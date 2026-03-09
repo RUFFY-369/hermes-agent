@@ -109,11 +109,7 @@ TOOLSETS = {
     
     "skills": {
         "description": "Access, create, edit, and manage skill documents with specialized instructions and knowledge",
-        "tools": [
-            "skills_list",
-            "skill_view",
-            "skill_manage",
-        ],
+        "tools": ["skills_list", "skill_view", "skill_manage"],
         "includes": []
     },
     
@@ -259,6 +255,12 @@ TOOLSETS = {
         "includes": []
     },
     
+    "hermes-signal": {
+        "description": "Signal bot toolset - encrypted messaging platform (full access)",
+        "tools": _HERMES_CORE_TOOLS,
+        "includes": []
+    },
+
     "hermes-homeassistant": {
         "description": "Home Assistant bot toolset - smart home event monitoring and control",
         "tools": _HERMES_CORE_TOOLS,
@@ -268,7 +270,7 @@ TOOLSETS = {
     "hermes-gateway": {
         "description": "Gateway toolset - union of all messaging platform tools",
         "tools": [],
-        "includes": ["hermes-telegram", "hermes-discord", "hermes-whatsapp", "hermes-slack", "hermes-homeassistant"]
+        "includes": ["hermes-telegram", "hermes-discord", "hermes-whatsapp", "hermes-slack", "hermes-signal", "hermes-homeassistant"]
     }
 }
 
@@ -498,7 +500,7 @@ if __name__ == "__main__":
     print("\nMultiple Toolset Resolution:")
     print("-" * 40)
     combined = resolve_multiple_toolsets(["web", "vision", "terminal"])
-    print("  Combining ['web', 'vision', 'terminal']:")
+    print(f"  Combining ['web', 'vision', 'terminal']:")
     print(f"    Result: {', '.join(sorted(combined))}")
     
     print("\nCustom Toolset Creation:")
@@ -510,6 +512,6 @@ if __name__ == "__main__":
         includes=["terminal", "vision"]
     )
     custom_info = get_toolset_info("my_custom")
-    print("  Created 'my_custom' toolset:")
+    print(f"  Created 'my_custom' toolset:")
     print(f"    Description: {custom_info['description']}")
     print(f"    Resolved tools: {', '.join(custom_info['resolved_tools'])}")
