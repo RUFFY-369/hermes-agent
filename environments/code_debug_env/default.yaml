@@ -1,0 +1,50 @@
+# Code Debug Environment -- Default Configuration
+#
+# Multi-turn debugging tasks using HumanEvalPack dataset.
+# The agent uses terminal + file tools to iteratively debug buggy Python code.
+#
+# Usage:
+#   python environments/code_debug_env/code_debug_env.py serve \
+#       --config environments/code_debug_env/default.yaml
+#
+#   # Process mode (no run-api needed)
+#   export ATROPOS_ALLOW_DUMMY_MANAGED_SERVER=1
+#   python environments/code_debug_env/code_debug_env.py process \
+#       --config environments/code_debug_env/default.yaml
+
+env:
+  enabled_toolsets: ["terminal", "file"]
+  max_agent_turns: 15
+  max_token_length: 4096
+  group_size: 4
+  terminal_backend: "local"
+  tool_call_parser: "hermes"
+  tokenizer_name: "NousResearch/DeepHermes-3-Llama-3-8B-Preview"
+  dataset_name: "bigcode/humanevalpack"
+  dataset_split: "test"
+  steps_per_eval: 50
+  total_steps: 200
+  use_wandb: true
+  wandb_name: "code-debug-agent"
+  ensure_scores_are_not_same: false
+  system_prompt: >
+    You are an expert Python debugger with access to terminal and file tools.
+    You will be given a workspace with a buggy Python file and a test file.
+    Your goal is to identify and fix the bug so all tests pass.
+
+    Debugging strategy:
+    1. Read the buggy code to understand its intent
+    2. Run the tests to see which ones fail and why
+    3. Identify the root cause of the failure
+    4. Edit the file to fix the bug
+    5. Run the tests again to verify your fix
+
+    Use the terminal to run commands and file tools to read/write files.
+    Be precise with your edits — fix only the bug, don't rewrite everything.
+
+openai:
+  base_url: "http://localhost:9001/v1"
+  model_name: "NousResearch/DeepHermes-3-Llama-3-8B-Preview"
+  server_type: "openai"
+  api_key: "x"
+  health_check: false
