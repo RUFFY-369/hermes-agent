@@ -1,10 +1,17 @@
 """Tests for agent.redact -- secret masking in logs and output."""
 
 import logging
+import os
 
 import pytest
 
 from agent.redact import redact_sensitive_text, RedactingFormatter
+
+
+@pytest.fixture(autouse=True)
+def _ensure_redaction_enabled(monkeypatch):
+    """Ensure HERMES_REDACT_SECRETS is not disabled by prior test imports."""
+    monkeypatch.delenv("HERMES_REDACT_SECRETS", raising=False)
 
 
 class TestKnownPrefixes:
@@ -124,6 +131,13 @@ class TestPassthrough:
     def test_none_returns_none(self):
         assert redact_sensitive_text(None) is None
 
+    def test_non_string_input_int_coerced(self):
+        assert redact_sensitive_text(12345) == "12345"
+
+    def test_non_string_input_dict_coerced_and_redacted(self):
+        result = redact_sensitive_text({"token": "sk-proj-abc123def456ghi789jkl012"})
+        assert "abc123def456" not in result
+
     def test_normal_text_unchanged(self):
         text = "Hello world, this is a normal log message with no secrets."
         assert redact_sensitive_text(text) == text
@@ -141,9 +155,13 @@ class TestRedactingFormatter:
     def test_formats_and_redacts(self):
         formatter = RedactingFormatter("%(message)s")
         record = logging.LogRecord(
-            name="test", level=logging.INFO, pathname="", lineno=0,
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
             msg="Key is sk-proj-abc123def456ghi789jkl012",
-            args=(), exc_info=None,
+            args=(),
+            exc_info=None,
         )
         result = formatter.format(record)
         assert "abc123def456" not in result
@@ -171,3 +189,15 @@ USER=teknium"""
         assert "HOME=/home/user" in result
         assert "SHELL=/bin/bash" in result
         assert "USER=teknium" in result
+
+
+class TestSecretCapturePayloadRedaction:
+    def test_secret_value_field_redacted(self):
+        text = '{"success": true, "secret_value": "sk-test-secret-1234567890"}'
+        result = redact_sensitive_text(text)
+        assert "sk-test-secret-1234567890" not in result
+
+    def test_raw_secret_field_redacted(self):
+        text = '{"raw_secret": "ghp_abc123def456ghi789jkl"}'
+        result = redact_sensitive_text(text)
+        assert "abc123def456" not in result

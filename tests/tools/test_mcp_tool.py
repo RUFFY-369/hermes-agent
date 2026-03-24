@@ -106,6 +106,18 @@ class TestSchemaConversion:
         assert schema["parameters"]["type"] == "object"
         assert schema["parameters"]["properties"] == {}
 
+    def test_object_schema_without_properties_gets_normalized(self):
+        from tools.mcp_tool import _convert_mcp_schema
+
+        mcp_tool = _make_mcp_tool(
+            name="ask",
+            description="Ask Crawl4AI",
+            input_schema={"type": "object"},
+        )
+        schema = _convert_mcp_schema("crawl4ai", mcp_tool)
+
+        assert schema["parameters"] == {"type": "object", "properties": {}}
+
     def test_tool_name_prefix_format(self):
         from tools.mcp_tool import _convert_mcp_schema
 
@@ -505,6 +517,42 @@ class TestToolsetInjection:
         assert "mcp_fs_list_files" not in fake_toolsets["non-hermes"]["tools"]
         # Original tools preserved
         assert "terminal" in fake_toolsets["hermes-cli"]["tools"]
+        # Server name becomes a standalone toolset
+        assert "fs" in fake_toolsets
+        assert "mcp_fs_list_files" in fake_toolsets["fs"]["tools"]
+        assert fake_toolsets["fs"]["description"].startswith("MCP server '")
+
+    def test_server_toolset_skips_builtin_collision(self):
+        """MCP server named after a built-in toolset shouldn't overwrite it."""
+        from tools.mcp_tool import MCPServerTask
+
+        mock_tools = [_make_mcp_tool("run", "Run command")]
+        mock_session = MagicMock()
+        fresh_servers = {}
+
+        async def fake_connect(name, config):
+            server = MCPServerTask(name)
+            server.session = mock_session
+            server._tools = mock_tools
+            return server
+
+        fake_toolsets = {
+            "hermes-cli": {"tools": ["terminal"], "description": "CLI", "includes": []},
+            # Built-in toolset named "terminal" — must not be overwritten
+            "terminal": {"tools": ["terminal"], "description": "Terminal tools", "includes": []},
+        }
+        fake_config = {"terminal": {"command": "npx", "args": []}}
+
+        with patch("tools.mcp_tool._MCP_AVAILABLE", True), \
+             patch("tools.mcp_tool._servers", fresh_servers), \
+             patch("tools.mcp_tool._load_mcp_config", return_value=fake_config), \
+             patch("tools.mcp_tool._connect_server", side_effect=fake_connect), \
+             patch("toolsets.TOOLSETS", fake_toolsets):
+            from tools.mcp_tool import discover_mcp_tools
+            discover_mcp_tools()
+
+        # Built-in toolset preserved — description unchanged
+        assert fake_toolsets["terminal"]["description"] == "Terminal tools"
 
     def test_server_connection_failure_skipped(self):
         """If one server fails to connect, others still proceed."""
@@ -1857,6 +1905,33 @@ class TestSamplingCallbackText:
         messages = call_args.kwargs["messages"]
         assert messages[0] == {"role": "system", "content": "Be helpful"}
 
+    def test_server_tools_with_object_schema_are_normalized(self):
+        """Server-provided tools should gain empty properties for object schemas."""
+        fake_client = MagicMock()
+        fake_client.chat.completions.create.return_value = _make_llm_response()
+        server_tool = SimpleNamespace(
+            name="ask",
+            description="Ask Crawl4AI",
+            inputSchema={"type": "object"},
+        )
+
+        with patch(
+            "agent.auxiliary_client.call_llm",
+            return_value=fake_client.chat.completions.create.return_value,
+        ) as mock_call:
+            params = _make_sampling_params(tools=[server_tool])
+            asyncio.run(self.handler(None, params))
+
+        tools = mock_call.call_args.kwargs["tools"]
+        assert tools == [{
+            "type": "function",
+            "function": {
+                "name": "ask",
+                "description": "Ask Crawl4AI",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }]
+
     def test_length_stop_reason(self):
         """finish_reason='length' maps to stopReason='maxTokens'."""
         fake_client = MagicMock()
@@ -2447,3 +2522,231 @@ class TestDiscoveryFailedCount:
         _servers.pop("ok1", None)
         _servers.pop("ok2", None)
         _servers.pop("fail1", None)
+
+
+class TestMCPSelectiveToolLoading:
+    """Tests for per-server MCP filtering and utility tool policies."""
+
+    def _make_server(self, name, tool_names, session=None):
+        server = _make_mock_server(
+            name,
+            session=session or SimpleNamespace(),
+            tools=[_make_mcp_tool(n, n) for n in tool_names],
+        )
+        return server
+
+    def _run_discover(self, name, tool_names, config, session=None):
+        from tools.registry import ToolRegistry
+        from tools.mcp_tool import _discover_and_register_server, _servers
+
+        mock_registry = ToolRegistry()
+        server = self._make_server(name, tool_names, session=session)
+
+        async def fake_connect(_name, _config):
+            return server
+
+        async def run():
+            with patch("tools.mcp_tool._connect_server", side_effect=fake_connect), \
+                 patch("tools.registry.registry", mock_registry), \
+                 patch("toolsets.create_custom_toolset"):
+                return await _discover_and_register_server(name, config)
+
+        try:
+            registered = asyncio.run(run())
+        finally:
+            _servers.pop(name, None)
+        return registered, mock_registry
+
+    def test_include_takes_precedence_over_exclude(self):
+        config = {
+            "url": "https://mcp.example.com",
+            "tools": {
+                "include": ["create_service"],
+                "exclude": ["create_service", "delete_service"],
+            },
+        }
+        registered, _ = self._run_discover(
+            "ink",
+            ["create_service", "delete_service", "list_services"],
+            config,
+            session=SimpleNamespace(),
+        )
+        assert registered == ["mcp_ink_create_service"]
+
+    def test_exclude_filter_registers_all_except_listed_tools(self):
+        config = {
+            "url": "https://mcp.example.com",
+            "tools": {"exclude": ["delete_service"]},
+        }
+        registered, _ = self._run_discover(
+            "ink_exclude",
+            ["create_service", "delete_service", "list_services"],
+            config,
+            session=SimpleNamespace(),
+        )
+        assert registered == [
+            "mcp_ink_exclude_create_service",
+            "mcp_ink_exclude_list_services",
+        ]
+
+    def test_include_filter_skips_utility_tools_without_capabilities(self):
+        config = {
+            "url": "https://mcp.example.com",
+            "tools": {"include": ["create_service"]},
+        }
+        registered, mock_registry = self._run_discover(
+            "ink_no_caps",
+            ["create_service", "delete_service"],
+            config,
+            session=SimpleNamespace(),
+        )
+        assert registered == ["mcp_ink_no_caps_create_service"]
+        assert set(mock_registry.get_all_tool_names()) == {"mcp_ink_no_caps_create_service"}
+
+    def test_no_filter_registers_all_server_tools_when_no_utilities_supported(self):
+        registered, _ = self._run_discover(
+            "ink_no_filter",
+            ["create_service", "delete_service", "list_services"],
+            {"url": "https://mcp.example.com"},
+            session=SimpleNamespace(),
+        )
+        assert registered == [
+            "mcp_ink_no_filter_create_service",
+            "mcp_ink_no_filter_delete_service",
+            "mcp_ink_no_filter_list_services",
+        ]
+
+    def test_resources_and_prompts_can_be_disabled_explicitly(self):
+        session = SimpleNamespace(
+            list_resources=AsyncMock(),
+            read_resource=AsyncMock(),
+            list_prompts=AsyncMock(),
+            get_prompt=AsyncMock(),
+        )
+        config = {
+            "url": "https://mcp.example.com",
+            "tools": {
+                "resources": False,
+                "prompts": False,
+            },
+        }
+        registered, _ = self._run_discover(
+            "ink_disabled_utils",
+            ["create_service"],
+            config,
+            session=session,
+        )
+        assert registered == ["mcp_ink_disabled_utils_create_service"]
+
+    def test_registers_only_utility_tools_supported_by_server_capabilities(self):
+        session = SimpleNamespace(
+            list_resources=AsyncMock(return_value=SimpleNamespace(resources=[])),
+            read_resource=AsyncMock(return_value=SimpleNamespace(contents=[])),
+        )
+        registered, _ = self._run_discover(
+            "ink_resources_only",
+            ["create_service"],
+            {"url": "https://mcp.example.com"},
+            session=session,
+        )
+        assert "mcp_ink_resources_only_create_service" in registered
+        assert "mcp_ink_resources_only_list_resources" in registered
+        assert "mcp_ink_resources_only_read_resource" in registered
+        assert "mcp_ink_resources_only_list_prompts" not in registered
+        assert "mcp_ink_resources_only_get_prompt" not in registered
+
+    def test_existing_tool_names_reflect_registered_subset(self):
+        from tools.mcp_tool import _existing_tool_names, _servers, _discover_and_register_server
+        from tools.registry import ToolRegistry
+
+        mock_registry = ToolRegistry()
+        server = self._make_server(
+            "ink_existing",
+            ["create_service", "delete_service"],
+            session=SimpleNamespace(),
+        )
+
+        async def fake_connect(_name, _config):
+            return server
+
+        async def run():
+            with patch("tools.mcp_tool._connect_server", side_effect=fake_connect), \
+                 patch.dict("tools.mcp_tool._servers", {}, clear=True), \
+                 patch("tools.registry.registry", mock_registry), \
+                 patch("toolsets.create_custom_toolset"):
+                registered = await _discover_and_register_server(
+                    "ink_existing",
+                    {"url": "https://mcp.example.com", "tools": {"include": ["create_service"]}},
+                )
+                return registered, _existing_tool_names()
+
+        try:
+            registered, existing = asyncio.run(run())
+            assert registered == ["mcp_ink_existing_create_service"]
+            assert existing == ["mcp_ink_existing_create_service"]
+        finally:
+            _servers.pop("ink_existing", None)
+
+    def test_no_toolset_created_when_everything_is_filtered_out(self):
+        from tools.registry import ToolRegistry
+        from tools.mcp_tool import _discover_and_register_server, _servers
+
+        mock_registry = ToolRegistry()
+        server = self._make_server("ink_none", ["create_service"], session=SimpleNamespace())
+        mock_create = MagicMock()
+
+        async def fake_connect(_name, _config):
+            return server
+
+        async def run():
+            with patch("tools.mcp_tool._connect_server", side_effect=fake_connect), \
+                 patch("tools.registry.registry", mock_registry), \
+                 patch("toolsets.create_custom_toolset", mock_create):
+                return await _discover_and_register_server(
+                    "ink_none",
+                    {
+                        "url": "https://mcp.example.com",
+                        "tools": {
+                            "include": ["missing_tool"],
+                            "resources": False,
+                            "prompts": False,
+                        },
+                    },
+                )
+
+        try:
+            registered = asyncio.run(run())
+            assert registered == []
+            mock_create.assert_not_called()
+            assert mock_registry.get_all_tool_names() == []
+        finally:
+            _servers.pop("ink_none", None)
+
+    def test_enabled_false_skips_connection_attempt(self):
+        from tools.mcp_tool import discover_mcp_tools
+
+        connect_called = []
+
+        async def fake_connect(name, config):
+            connect_called.append(name)
+            return self._make_server(name, ["create_service"])
+
+        fake_config = {
+            "ink": {
+                "url": "https://mcp.example.com",
+                "enabled": False,
+            }
+        }
+        fake_toolsets = {
+            "hermes-cli": {"tools": [], "description": "CLI", "includes": []},
+        }
+
+        with patch("tools.mcp_tool._MCP_AVAILABLE", True), \
+             patch("tools.mcp_tool._servers", {}), \
+             patch("tools.mcp_tool._load_mcp_config", return_value=fake_config), \
+             patch("tools.mcp_tool._connect_server", side_effect=fake_connect), \
+             patch("toolsets.TOOLSETS", fake_toolsets):
+            result = discover_mcp_tools()
+
+        assert connect_called == []
+        assert result == []

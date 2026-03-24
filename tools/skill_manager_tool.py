@@ -59,11 +59,17 @@ def _security_scan_skill(skill_dir: Path) -> Optional[str]:
     try:
         result = scan_skill(skill_dir, source="agent-created")
         allowed, reason = should_allow_install(result)
-        if not allowed:
+        if allowed is False:
             report = format_scan_report(result)
             return f"Security scan blocked this skill ({reason}):\n{report}"
+        if allowed is None:
+            # "ask" — allow but include the warning so the user sees the findings
+            report = format_scan_report(result)
+            logger.warning("Agent-created skill has security findings: %s", reason)
+            # Don't block — return None to allow, but log the warning
+            return None
     except Exception as e:
-        logger.warning("Security scan failed for %s: %s", skill_dir, e)
+        logger.warning("Security scan failed for %s: %s", skill_dir, e, exc_info=True)
     return None
 
 import yaml
@@ -219,7 +225,7 @@ def _atomic_write_text(file_path: Path, content: str, encoding: str = "utf-8") -
         try:
             os.unlink(temp_path)
         except OSError:
-            pass
+            logger.error("Failed to remove temporary file %s during atomic write", temp_path, exc_info=True)
         raise
 
 
@@ -561,7 +567,8 @@ SKILL_MANAGE_SCHEMA = {
         "user-corrected approach worked, non-trivial workflow discovered, "
         "or user asks you to remember a procedure.\n"
         "Update when: instructions stale/wrong, OS-specific failures, "
-        "missing steps or pitfalls found during use.\n\n"
+        "missing steps or pitfalls found during use. "
+        "If you used a skill and hit issues not covered by it, patch it immediately.\n\n"
         "After difficult/iterative tasks, offer to save as a skill. "
         "Skip for simple one-offs. Confirm with user before creating/deleting.\n\n"
         "Good skills: trigger conditions, numbered steps with exact commands, "
@@ -653,4 +660,5 @@ registry.register(
         old_string=args.get("old_string"),
         new_string=args.get("new_string"),
         replace_all=args.get("replace_all", False)),
+    emoji="📝",
 )

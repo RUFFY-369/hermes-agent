@@ -300,16 +300,16 @@ def _rpc_server_loop(
                 # their status prints don't leak into the CLI spinner.
                 try:
                     _real_stdout, _real_stderr = sys.stdout, sys.stderr
-                    sys.stdout = open(os.devnull, "w")
-                    sys.stderr = open(os.devnull, "w")
+                    devnull = open(os.devnull, "w")
                     try:
+                        sys.stdout = devnull
+                        sys.stderr = devnull
                         result = handle_function_call(
                             tool_name, tool_args, task_id=task_id
                         )
                     finally:
-                        sys.stdout.close()
-                        sys.stderr.close()
                         sys.stdout, sys.stderr = _real_stdout, _real_stderr
+                        devnull.close()
                 except Exception as exc:
                     logger.error("Tool call failed in sandbox: %s", exc, exc_info=True)
                     result = json.dumps({"error": str(exc)})
@@ -395,6 +395,7 @@ def execute_code(
     tool_call_log: list = []
     tool_call_counter = [0]  # mutable so the RPC thread can increment
     exec_start = time.monotonic()
+    server_sock = None
 
     try:
         # Write the auto-generated hermes_tools module
@@ -440,6 +441,11 @@ def execute_code(
                 child_env[k] = v
         child_env["HERMES_RPC_SOCKET"] = sock_path
         child_env["PYTHONDONTWRITEBYTECODE"] = "1"
+        # Ensure the hermes-agent root is importable in the sandbox so
+        # modules like minisweagent_path are available to child scripts.
+        _hermes_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        _existing_pp = child_env.get("PYTHONPATH", "")
+        child_env["PYTHONPATH"] = _hermes_root + (os.pathsep + _existing_pp if _existing_pp else "")
         # Inject user's configured timezone so datetime.now() in sandboxed
         # code reflects the correct wall-clock time.
         _tz_name = os.getenv("HERMES_TIMEZONE", "").strip()
@@ -568,7 +574,14 @@ def execute_code(
 
         # Wait for RPC thread to finish
         server_sock.close()  # break accept() so thread exits promptly
+        server_sock = None  # prevent double close in finally
         rpc_thread.join(timeout=3)
+
+        # Strip ANSI escape sequences so the model never sees terminal
+        # formatting — prevents it from copying escapes into file writes.
+        from tools.ansi_strip import strip_ansi
+        stdout_text = strip_ansi(stdout_text)
+        stderr_text = strip_ansi(stderr_text)
 
         # Build response
         result: Dict[str, Any] = {
@@ -593,7 +606,14 @@ def execute_code(
 
     except Exception as exc:
         duration = round(time.monotonic() - exec_start, 2)
-        logging.exception("execute_code failed")
+        logger.error(
+            "execute_code failed after %ss with %d tool calls: %s: %s",
+            duration,
+            tool_call_counter[0],
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
         return json.dumps({
             "status": "error",
             "error": str(exc),
@@ -603,19 +623,17 @@ def execute_code(
 
     finally:
         # Cleanup temp dir and socket
-        try:
-            server_sock.close()
-        except Exception as e:
-            logger.debug("Server socket close error: %s", e)
-        try:
-            import shutil
-            shutil.rmtree(tmpdir, ignore_errors=True)
-        except Exception as e:
-            logger.debug("Could not clean temp dir: %s", e, exc_info=True)
+        if server_sock is not None:
+            try:
+                server_sock.close()
+            except OSError as e:
+                logger.debug("Server socket close error: %s", e)
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
         try:
             os.unlink(sock_path)
-        except OSError as e:
-            logger.debug("Could not remove socket file: %s", e, exc_info=True)
+        except OSError:
+            pass  # already cleaned up or never created
 
 
 def _kill_process_group(proc, escalate: bool = False):
@@ -771,4 +789,5 @@ registry.register(
         task_id=kw.get("task_id"),
         enabled_tools=kw.get("enabled_tools")),
     check_fn=check_sandbox_requirements,
+    emoji="🐍",
 )

@@ -42,6 +42,7 @@ def _make_cli(env_overrides=None, config_overrides=None, **kwargs):
         "prompt_toolkit.key_binding": MagicMock(),
         "prompt_toolkit.completion": MagicMock(),
         "prompt_toolkit.formatted_text": MagicMock(),
+        "prompt_toolkit.auto_suggest": MagicMock(),
     }
     with patch.dict(sys.modules, prompt_toolkit_stubs), \
          patch.dict("os.environ", clean_env, clear=False):
@@ -93,6 +94,17 @@ class TestVerboseAndToolProgress:
         cli = _make_cli()
         assert isinstance(cli.tool_progress_mode, str)
         assert cli.tool_progress_mode in ("off", "new", "all", "verbose")
+
+
+class TestSingleQueryState:
+    def test_voice_and_interrupt_state_initialized_before_run(self):
+        """Single-query mode calls chat() without going through run()."""
+        cli = _make_cli()
+        assert cli._voice_tts is False
+        assert cli._voice_mode is False
+        assert cli._voice_tts_done.is_set()
+        assert hasattr(cli, "_interrupt_queue")
+        assert hasattr(cli, "_pending_input")
 
 
 class TestHistoryDisplay:

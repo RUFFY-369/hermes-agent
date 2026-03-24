@@ -33,17 +33,30 @@ class TestValidateImageUrl:
         assert _validate_image_url("https://example.com/image.jpg") is True
 
     def test_valid_http_url(self):
-        assert _validate_image_url("http://cdn.example.org/photo.png") is True
+        with patch("tools.url_safety.socket.getaddrinfo", return_value=[
+            (2, 1, 6, "", ("93.184.216.34", 0)),
+        ]):
+            assert _validate_image_url("http://cdn.example.org/photo.png") is True
 
     def test_valid_url_without_extension(self):
         """CDN endpoints that redirect to images should still pass."""
-        assert _validate_image_url("https://cdn.example.com/abcdef123") is True
+        with patch("tools.url_safety.socket.getaddrinfo", return_value=[
+            (2, 1, 6, "", ("93.184.216.34", 0)),
+        ]):
+            assert _validate_image_url("https://cdn.example.com/abcdef123") is True
 
     def test_valid_url_with_query_params(self):
-        assert _validate_image_url("https://img.example.com/pic?w=200&h=200") is True
+        with patch("tools.url_safety.socket.getaddrinfo", return_value=[
+            (2, 1, 6, "", ("93.184.216.34", 0)),
+        ]):
+            assert _validate_image_url("https://img.example.com/pic?w=200&h=200") is True
+
+    def test_localhost_url_blocked_by_ssrf(self):
+        """localhost URLs are now blocked by SSRF protection."""
+        assert _validate_image_url("http://localhost:8080/image.png") is False
 
     def test_valid_url_with_port(self):
-        assert _validate_image_url("http://localhost:8080/image.png") is True
+        assert _validate_image_url("http://example.com:8080/image.png") is True
 
     def test_valid_url_with_path_only(self):
         assert _validate_image_url("https://example.com/") is True
@@ -351,6 +364,19 @@ class TestVisionRequirements:
         result = check_vision_requirements()
         assert isinstance(result, bool)
 
+    def test_check_requirements_accepts_codex_auth(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        (tmp_path / "auth.json").write_text(
+            '{"active_provider":"openai-codex","providers":{"openai-codex":{"tokens":{"access_token":"codex-access-token","refresh_token":"codex-refresh-token"}}}}'
+        )
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("AUXILIARY_VISION_PROVIDER", raising=False)
+        monkeypatch.delenv("CONTEXT_VISION_PROVIDER", raising=False)
+
+        assert check_vision_requirements() is True
+
     def test_debug_session_info_returns_dict(self):
         info = get_debug_session_info()
         assert isinstance(info, dict)
@@ -363,6 +389,62 @@ class TestVisionRequirements:
 # ---------------------------------------------------------------------------
 # Integration: registry entry
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Tilde expansion in local file paths
+# ---------------------------------------------------------------------------
+
+
+class TestTildeExpansion:
+    """Verify that ~/path style paths are expanded correctly."""
+
+    @pytest.mark.asyncio
+    async def test_tilde_path_expanded_to_local_file(self, tmp_path, monkeypatch):
+        """vision_analyze_tool should expand ~ in file paths."""
+        # Create a fake image file under a fake home directory
+        fake_home = tmp_path / "fakehome"
+        fake_home.mkdir()
+        img = fake_home / "test_image.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+
+        monkeypatch.setenv("HOME", str(fake_home))
+
+        mock_response = MagicMock()
+        mock_choice = MagicMock()
+        mock_choice.message.content = "A test image"
+        mock_response.choices = [mock_choice]
+
+        with (
+            patch(
+                "tools.vision_tools._image_to_base64_data_url",
+                return_value="data:image/png;base64,abc",
+            ),
+            patch(
+                "tools.vision_tools.async_call_llm",
+                new_callable=AsyncMock,
+                return_value=mock_response,
+            ),
+        ):
+            result = await vision_analyze_tool(
+                "~/test_image.png", "describe this", "test/model"
+            )
+            data = json.loads(result)
+            assert data["success"] is True
+            assert data["analysis"] == "A test image"
+
+    @pytest.mark.asyncio
+    async def test_tilde_path_nonexistent_file_gives_error(self, tmp_path, monkeypatch):
+        """A tilde path that doesn't resolve to a real file should fail gracefully."""
+        fake_home = tmp_path / "fakehome"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+
+        result = await vision_analyze_tool(
+            "~/nonexistent.png", "describe this", "test/model"
+        )
+        data = json.loads(result)
+        assert data["success"] is False
 
 
 class TestVisionRegistration:

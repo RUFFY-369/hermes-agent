@@ -7,6 +7,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from agent.prompt_caching import apply_anthropic_cache_control
 from agent.anthropic_adapter import (
     _is_oauth_token,
     _refresh_oauth_token,
@@ -15,6 +16,7 @@ from agent.anthropic_adapter import (
     build_anthropic_kwargs,
     convert_messages_to_anthropic,
     convert_tools_to_anthropic,
+    get_anthropic_token_source,
     is_claude_code_token_valid,
     normalize_anthropic_response,
     normalize_model_name,
@@ -86,16 +88,25 @@ class TestReadClaudeCodeCredentials:
         cred_file.parent.mkdir(parents=True)
         cred_file.write_text(json.dumps({
             "claudeAiOauth": {
-                "accessToken": "sk-ant-oat01-test-token",
-                "refreshToken": "sk-ant-ort01-refresh",
+                "accessToken": "sk-ant-oat01-token",
+                "refreshToken": "sk-ant-oat01-refresh",
                 "expiresAt": int(time.time() * 1000) + 3600_000,
             }
         }))
         monkeypatch.setattr("agent.anthropic_adapter.Path.home", lambda: tmp_path)
         creds = read_claude_code_credentials()
         assert creds is not None
-        assert creds["accessToken"] == "sk-ant-oat01-test-token"
-        assert creds["refreshToken"] == "sk-ant-ort01-refresh"
+        assert creds["accessToken"] == "sk-ant-oat01-token"
+        assert creds["refreshToken"] == "sk-ant-oat01-refresh"
+        assert creds["source"] == "claude_code_credentials_file"
+
+    def test_ignores_primary_api_key_for_native_anthropic_resolution(self, tmp_path, monkeypatch):
+        claude_json = tmp_path / ".claude.json"
+        claude_json.write_text(json.dumps({"primaryApiKey": "sk-ant-api03-primary"}))
+        monkeypatch.setattr("agent.anthropic_adapter.Path.home", lambda: tmp_path)
+
+        creds = read_claude_code_credentials()
+        assert creds is None
 
     def test_returns_none_for_missing_file(self, tmp_path, monkeypatch):
         monkeypatch.setattr("agent.anthropic_adapter.Path.home", lambda: tmp_path)
@@ -133,10 +144,30 @@ class TestIsClaudeCodeTokenValid:
 
 
 class TestResolveAnthropicToken:
-    def test_prefers_oauth_token_over_api_key(self, monkeypatch):
+    def test_prefers_oauth_token_over_api_key(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-mykey")
         monkeypatch.setenv("ANTHROPIC_TOKEN", "sk-ant-oat01-mytoken")
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+        monkeypatch.setattr("agent.anthropic_adapter.Path.home", lambda: tmp_path)
         assert resolve_anthropic_token() == "sk-ant-oat01-mytoken"
+
+    def test_reports_claude_json_primary_key_source(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("ANTHROPIC_TOKEN", raising=False)
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+        (tmp_path / ".claude.json").write_text(json.dumps({"primaryApiKey": "sk-ant-api03-primary"}))
+        monkeypatch.setattr("agent.anthropic_adapter.Path.home", lambda: tmp_path)
+
+        assert get_anthropic_token_source("sk-ant-api03-primary") == "claude_json_primary_api_key"
+
+    def test_does_not_resolve_primary_api_key_as_native_anthropic_token(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("ANTHROPIC_TOKEN", raising=False)
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+        (tmp_path / ".claude.json").write_text(json.dumps({"primaryApiKey": "sk-ant-api03-primary"}))
+        monkeypatch.setattr("agent.anthropic_adapter.Path.home", lambda: tmp_path)
+
+        assert resolve_anthropic_token() is None
 
     def test_falls_back_to_api_key_when_no_oauth_sources_exist(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-mykey")
@@ -145,9 +176,11 @@ class TestResolveAnthropicToken:
         monkeypatch.setattr("agent.anthropic_adapter.Path.home", lambda: tmp_path)
         assert resolve_anthropic_token() == "sk-ant-api03-mykey"
 
-    def test_falls_back_to_token(self, monkeypatch):
+    def test_falls_back_to_token(self, monkeypatch, tmp_path):
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         monkeypatch.setenv("ANTHROPIC_TOKEN", "sk-ant-oat01-mytoken")
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+        monkeypatch.setattr("agent.anthropic_adapter.Path.home", lambda: tmp_path)
         assert resolve_anthropic_token() == "sk-ant-oat01-mytoken"
 
     def test_returns_none_with_no_creds(self, monkeypatch, tmp_path):
@@ -179,6 +212,33 @@ class TestResolveAnthropicToken:
         }))
         monkeypatch.setattr("agent.anthropic_adapter.Path.home", lambda: tmp_path)
         assert resolve_anthropic_token() == "cc-auto-token"
+
+    def test_prefers_refreshable_claude_code_credentials_over_static_anthropic_token(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setenv("ANTHROPIC_TOKEN", "sk-ant-oat01-static-token")
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+        cred_file = tmp_path / ".claude" / ".credentials.json"
+        cred_file.parent.mkdir(parents=True)
+        cred_file.write_text(json.dumps({
+            "claudeAiOauth": {
+                "accessToken": "cc-auto-token",
+                "refreshToken": "refresh-token",
+                "expiresAt": int(time.time() * 1000) + 3600_000,
+            }
+        }))
+        monkeypatch.setattr("agent.anthropic_adapter.Path.home", lambda: tmp_path)
+
+        assert resolve_anthropic_token() == "cc-auto-token"
+
+    def test_keeps_static_anthropic_token_when_only_non_refreshable_claude_key_exists(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setenv("ANTHROPIC_TOKEN", "sk-ant-oat01-static-token")
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+        claude_json = tmp_path / ".claude.json"
+        claude_json.write_text(json.dumps({"primaryApiKey": "sk-ant-api03-managed-key"}))
+        monkeypatch.setattr("agent.anthropic_adapter.Path.home", lambda: tmp_path)
+
+        assert resolve_anthropic_token() == "sk-ant-oat01-static-token"
 
 
 class TestRefreshOauthToken:
@@ -278,6 +338,27 @@ class TestResolveWithRefresh:
 
         assert result == "refreshed-token"
 
+    def test_static_env_oauth_token_does_not_block_refreshable_claude_creds(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setenv("ANTHROPIC_TOKEN", "sk-ant-oat01-expired-env-token")
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+
+        cred_file = tmp_path / ".claude" / ".credentials.json"
+        cred_file.parent.mkdir(parents=True)
+        cred_file.write_text(json.dumps({
+            "claudeAiOauth": {
+                "accessToken": "expired-claude-creds-token",
+                "refreshToken": "valid-refresh",
+                "expiresAt": int(time.time() * 1000) - 3600_000,
+            }
+        }))
+        monkeypatch.setattr("agent.anthropic_adapter.Path.home", lambda: tmp_path)
+
+        with patch("agent.anthropic_adapter._refresh_oauth_token", return_value="refreshed-token"):
+            result = resolve_anthropic_token()
+
+        assert result == "refreshed-token"
+
 
 class TestRunOauthSetupToken:
     def test_raises_when_claude_not_installed(self, monkeypatch):
@@ -358,6 +439,23 @@ class TestNormalizeModelName:
     def test_leaves_bare_name(self):
         assert normalize_model_name("claude-sonnet-4-20250514") == "claude-sonnet-4-20250514"
 
+    def test_converts_dots_to_hyphens(self):
+        """OpenRouter uses dots (4.6), Anthropic uses hyphens (4-6)."""
+        assert normalize_model_name("anthropic/claude-opus-4.6") == "claude-opus-4-6"
+        assert normalize_model_name("anthropic/claude-sonnet-4.5") == "claude-sonnet-4-5"
+        assert normalize_model_name("claude-opus-4.6") == "claude-opus-4-6"
+
+    def test_already_hyphenated_unchanged(self):
+        """Names already in Anthropic format should pass through."""
+        assert normalize_model_name("claude-opus-4-6") == "claude-opus-4-6"
+        assert normalize_model_name("claude-opus-4-5-20251101") == "claude-opus-4-5-20251101"
+
+    def test_preserve_dots_for_alibaba_dashscope(self):
+        """Alibaba/DashScope use dots in model names (e.g. qwen3.5-plus). Fixes #1739."""
+        assert normalize_model_name("qwen3.5-plus", preserve_dots=True) == "qwen3.5-plus"
+        assert normalize_model_name("anthropic/qwen3.5-plus", preserve_dots=True) == "qwen3.5-plus"
+        assert normalize_model_name("qwen3.5-flash", preserve_dots=True) == "qwen3.5-flash"
+
 
 # ---------------------------------------------------------------------------
 # Tool conversion
@@ -407,6 +505,59 @@ class TestConvertMessages:
         assert len(result) == 1
         assert result[0]["role"] == "user"
 
+    def test_converts_user_image_url_blocks_to_anthropic_image_blocks(self):
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Can you see this?"},
+                    {"type": "image_url", "image_url": {"url": "https://example.com/cat.png"}},
+                ],
+            }
+        ]
+
+        _, result = convert_messages_to_anthropic(messages)
+
+        assert result == [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Can you see this?"},
+                    {"type": "image", "source": {"type": "url", "url": "https://example.com/cat.png"}},
+                ],
+            }
+        ]
+
+    def test_converts_data_url_image_blocks_to_base64_anthropic_image_blocks(self):
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "What is in this screenshot?"},
+                    {"type": "input_image", "image_url": "data:image/png;base64,AAAA"},
+                ],
+            }
+        ]
+
+        _, result = convert_messages_to_anthropic(messages)
+
+        assert result == [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What is in this screenshot?"},
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": "AAAA",
+                        },
+                    },
+                ],
+            }
+        ]
+
     def test_converts_tool_calls(self):
         messages = [
             {
@@ -433,21 +584,39 @@ class TestConvertMessages:
 
     def test_converts_tool_results(self):
         messages = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "tc_1", "function": {"name": "test_tool", "arguments": "{}"}},
+                ],
+            },
             {"role": "tool", "tool_call_id": "tc_1", "content": "result data"},
         ]
         _, result = convert_messages_to_anthropic(messages)
-        assert result[0]["role"] == "user"
-        assert result[0]["content"][0]["type"] == "tool_result"
-        assert result[0]["content"][0]["tool_use_id"] == "tc_1"
+        # tool result is in the second message (user role)
+        user_msg = [m for m in result if m["role"] == "user"][0]
+        assert user_msg["content"][0]["type"] == "tool_result"
+        assert user_msg["content"][0]["tool_use_id"] == "tc_1"
 
     def test_merges_consecutive_tool_results(self):
         messages = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "tc_1", "function": {"name": "tool_a", "arguments": "{}"}},
+                    {"id": "tc_2", "function": {"name": "tool_b", "arguments": "{}"}},
+                ],
+            },
             {"role": "tool", "tool_call_id": "tc_1", "content": "result 1"},
             {"role": "tool", "tool_call_id": "tc_2", "content": "result 2"},
         ]
         _, result = convert_messages_to_anthropic(messages)
-        assert len(result) == 1
-        assert len(result[0]["content"]) == 2
+        # assistant + merged user (with 2 tool_results)
+        user_msgs = [m for m in result if m["role"] == "user"]
+        assert len(user_msgs) == 1
+        assert len(user_msgs[0]["content"]) == 2
 
     def test_strips_orphaned_tool_use(self):
         messages = [
@@ -465,6 +634,51 @@ class TestConvertMessages:
         assistant_blocks = result[0]["content"]
         assert all(b.get("type") != "tool_use" for b in assistant_blocks)
 
+    def test_strips_orphaned_tool_result(self):
+        """tool_result with no matching tool_use should be stripped.
+
+        This happens when context compression removes the assistant message
+        containing the tool_use but leaves the subsequent tool_result intact.
+        Anthropic rejects orphaned tool_results with a 400.
+        """
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there"},
+            # The assistant tool_use message was removed by compression,
+            # but the tool_result survived:
+            {"role": "tool", "tool_call_id": "tc_gone", "content": "stale result"},
+            {"role": "user", "content": "Thanks"},
+        ]
+        _, result = convert_messages_to_anthropic(messages)
+        # tc_gone has no matching tool_use — its tool_result should be stripped
+        for m in result:
+            if m["role"] == "user" and isinstance(m["content"], list):
+                assert all(
+                    b.get("type") != "tool_result"
+                    for b in m["content"]
+                ), "Orphaned tool_result should have been stripped"
+
+    def test_strips_orphaned_tool_result_preserves_valid(self):
+        """Orphaned tool_results are stripped while valid ones survive."""
+        messages = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "tc_valid", "function": {"name": "search", "arguments": "{}"}},
+                ],
+            },
+            {"role": "tool", "tool_call_id": "tc_valid", "content": "good result"},
+            {"role": "tool", "tool_call_id": "tc_orphan", "content": "stale result"},
+        ]
+        _, result = convert_messages_to_anthropic(messages)
+        user_msg = [m for m in result if m["role"] == "user"][0]
+        tool_results = [
+            b for b in user_msg["content"] if b.get("type") == "tool_result"
+        ]
+        assert len(tool_results) == 1
+        assert tool_results[0]["tool_use_id"] == "tc_valid"
+
     def test_system_with_cache_control(self):
         messages = [
             {
@@ -479,6 +693,113 @@ class TestConvertMessages:
         # When cache_control is present, system should be a list of blocks
         assert isinstance(system, list)
         assert system[0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_assistant_cache_control_blocks_are_preserved(self):
+        messages = apply_anthropic_cache_control([
+            {"role": "system", "content": "System prompt"},
+            {"role": "assistant", "content": "Hello from assistant"},
+        ])
+
+        _, result = convert_messages_to_anthropic(messages)
+        assistant_blocks = result[0]["content"]
+
+        assert assistant_blocks[0]["type"] == "text"
+        assert assistant_blocks[0]["text"] == "Hello from assistant"
+        assert assistant_blocks[0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_tool_cache_control_is_preserved_on_tool_result_block(self):
+        messages = apply_anthropic_cache_control([
+            {"role": "system", "content": "System prompt"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "tc_1", "function": {"name": "test_tool", "arguments": "{}"}},
+                ],
+            },
+            {"role": "tool", "tool_call_id": "tc_1", "content": "result"},
+        ], native_anthropic=True)
+
+        _, result = convert_messages_to_anthropic(messages)
+        user_msg = [m for m in result if m["role"] == "user"][0]
+        tool_block = user_msg["content"][0]
+
+        assert tool_block["type"] == "tool_result"
+        assert tool_block["tool_use_id"] == "tc_1"
+        assert tool_block["content"] == "result"
+        assert tool_block["cache_control"] == {"type": "ephemeral"}
+
+    def test_converts_data_url_image_to_anthropic_image_block(self):
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Describe this image"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,ZmFrZQ=="},
+                    },
+                ],
+            }
+        ]
+
+        _, result = convert_messages_to_anthropic(messages)
+        blocks = result[0]["content"]
+        assert blocks[0] == {"type": "text", "text": "Describe this image"}
+        assert blocks[1] == {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": "ZmFrZQ==",
+            },
+        }
+
+    def test_converts_remote_image_url_to_anthropic_image_block(self):
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Describe this image"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "https://example.com/cat.png"},
+                    },
+                ],
+            }
+        ]
+
+        _, result = convert_messages_to_anthropic(messages)
+        blocks = result[0]["content"]
+        assert blocks[1] == {
+            "type": "image",
+            "source": {
+                "type": "url",
+                "url": "https://example.com/cat.png",
+            },
+        }
+
+    def test_empty_cached_assistant_tool_turn_converts_without_empty_text_block(self):
+        messages = apply_anthropic_cache_control([
+            {"role": "system", "content": "System prompt"},
+            {"role": "user", "content": "Find the skill"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "tc_1", "function": {"name": "skill_view", "arguments": "{}"}},
+                ],
+            },
+            {"role": "tool", "tool_call_id": "tc_1", "content": "result"},
+        ])
+
+        _, result = convert_messages_to_anthropic(messages)
+
+        assistant_turn = next(msg for msg in result if msg["role"] == "assistant")
+        assistant_blocks = assistant_turn["content"]
+
+        assert all(not (b.get("type") == "text" and b.get("text") == "") for b in assistant_blocks)
+        assert any(b.get("type") == "tool_use" for b in assistant_blocks)
 
 
 # ---------------------------------------------------------------------------

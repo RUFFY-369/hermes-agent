@@ -42,10 +42,11 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Add mini-swe-agent to path if not installed
-mini_swe_path = Path(__file__).parent / "mini-swe-agent" / "src"
-if mini_swe_path.exists():
-    sys.path.insert(0, str(mini_swe_path))
+# Add mini-swe-agent to path if not installed. In git worktrees the populated
+# submodule may live in the main checkout rather than the worktree itself.
+from minisweagent_path import ensure_minisweagent_on_path
+
+ensure_minisweagent_on_path(Path(__file__).resolve().parent)
 
 
 # ============================================================================
@@ -338,6 +339,7 @@ class MiniSWERunner:
                     
                     # Add tool calls in XML format
                     for tool_call in msg["tool_calls"]:
+                        if not tool_call or not isinstance(tool_call, dict): continue
                         try:
                             arguments = json.loads(tool_call["function"]["arguments"]) \
                                 if isinstance(tool_call["function"]["arguments"], str) \

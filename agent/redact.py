@@ -47,7 +47,7 @@ _ENV_ASSIGN_RE = re.compile(
 )
 
 # JSON field patterns: "apiKey": "value", "token": "value", etc.
-_JSON_KEY_NAMES = r"(?:api_?[Kk]ey|token|secret|password|access_token|refresh_token|auth_token|bearer)"
+_JSON_KEY_NAMES = r"(?:api_?[Kk]ey|token|secret|password|access_token|refresh_token|auth_token|bearer|secret_value|raw_secret|secret_input|key_material)"
 _JSON_FIELD_RE = re.compile(
     rf'("{_JSON_KEY_NAMES}")\s*:\s*"([^"]+)"',
     re.IGNORECASE,
@@ -100,6 +100,10 @@ def redact_sensitive_text(text: str) -> str:
     Safe to call on any string -- non-matching text passes through unchanged.
     Disabled when security.redact_secrets is false in config.yaml.
     """
+    if text is None:
+        return None
+    if not isinstance(text, str):
+        text = str(text)
     if not text:
         return text
     if os.getenv("HERMES_REDACT_SECRETS", "").lower() in ("0", "false", "no", "off"):
