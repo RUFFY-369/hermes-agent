@@ -9,7 +9,7 @@ this environment gives the agent a real sandbox with:
     - /workspace/buggy.py  (the buggy function to fix)
     - /workspace/tests.py  (the test suite to pass)
 
-The agent can read files, run tests, edit code, and re-run tests — exactly
+The agent can read files, run tests, edit code, and re-run tests - exactly
 how a human developer would debug.
 
 Reward is multi-signal:
@@ -56,7 +56,7 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# Test runner template — uploaded to /workspace/tests.py
+# Test runner template - uploaded to /workspace/tests.py
 # =============================================================================
 
 TEST_RUNNER_TEMPLATE = '''"""Auto-generated test runner for {entry_point}."""
@@ -96,7 +96,7 @@ class CodeDebugEnv(HermesAgentBaseEnv):
     2. The agent uses terminal/file tools to debug and fix the code
     3. Reward is computed by running tests in the sandbox via ToolContext
 
-    This is the agentic version of the Atropos code_debug_env — instead of
+    This is the agentic version of the Atropos code_debug_env - instead of
     single-turn "output the fix", the model iteratively debugs like a human.
     """
 
@@ -126,7 +126,7 @@ class CodeDebugEnv(HermesAgentBaseEnv):
                 "4. Edit the file to fix the bug\n"
                 "5. Run the tests again to verify your fix\n\n"
                 "Use the terminal to run commands and file tools to read/write files. "
-                "Be precise with your edits — fix only the bug, don't rewrite everything."
+                "Be precise with your edits - fix only the bug, don't rewrite everything."
             ),
             # Local terminal backend (override to modal/docker for production)
             terminal_backend="local",
@@ -160,7 +160,7 @@ class CodeDebugEnv(HermesAgentBaseEnv):
 
     async def setup(self):
         """Load HumanEvalPack dataset and prepare train/test splits."""
-        print("Loading HumanEvalPack (python) dataset...")
+        logger.info("Loading HumanEvalPack (python) dataset...")
         dataset = load_dataset(
             self.config.dataset_name or "bigcode/humanevalpack",
             "python",
@@ -180,15 +180,15 @@ class CodeDebugEnv(HermesAgentBaseEnv):
                 }
             )
 
-        print(f"Loaded {len(all_items)} problems")
+        logger.info("Loaded %d problems", len(all_items))
 
         # Split 80/20 train/test
         random.shuffle(all_items)
         split_idx = int(len(all_items) * 0.8)
         self.train = all_items[:split_idx]
         self.test = all_items[split_idx:]
-
-        print(f"Train: {len(self.train)}, Test: {len(self.test)}")
+ 
+        logger.info("Train: %d, Test: %d", len(self.train), len(self.test))
         self.iter = 0
 
         # Reward tracking for wandb
@@ -213,7 +213,7 @@ class CodeDebugEnv(HermesAgentBaseEnv):
         return (
             f"There is a buggy Python function in `/workspace/buggy.py` that needs to be fixed.\n"
             f"The function `{item['entry_point']}` has a bug that causes test failures.\n\n"
-            f"A test file is available at `/workspace/tests.py` — run it to see which tests fail.\n\n"
+            f"A test file is available at `/workspace/tests.py` - run it to see which tests fail.\n\n"
             f"Your task:\n"
             f"1. Read `/workspace/buggy.py` to understand the function\n"
             f"2. Run `python /workspace/tests.py` to see the failures\n"
@@ -396,7 +396,7 @@ class CodeDebugEnv(HermesAgentBaseEnv):
         if test_result.get("exit_code") == 0 and "ALL TESTS PASSED" in test_output:
             test_signal = 1.0
         elif "TEST FAILED" in test_output:
-            # Tests ran but some failed — at least the code compiles
+            # Tests ran but some failed - at least the code compiles
             test_signal = 0.2
         elif "SyntaxError" in test_output or "IndentationError" in test_output:
             # Code doesn't even parse
@@ -463,7 +463,7 @@ class CodeDebugEnv(HermesAgentBaseEnv):
     async def evaluate(self, *args, **kwargs):
         """Run evaluation on the test split."""
         start_time = time.time()
-        # Eval is a lightweight check — just log current stats
+        # Eval is a lightweight check - just log current stats
         end_time = time.time()
 
         eval_metrics = {

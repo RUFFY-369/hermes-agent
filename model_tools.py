@@ -65,7 +65,7 @@ def _get_worker_loop():
     gets its own long-lived loop stored in thread-local storage.  This
     prevents the "Event loop is closed" errors that occurred when
     asyncio.run() was used per-call: asyncio.run() creates a loop, runs
-    the coroutine, then *closes* the loop — but cached httpx/AsyncOpenAI
+    the coroutine, then *closes* the loop - but cached httpx/AsyncOpenAI
     clients remain bound to that now-dead loop and raise RuntimeError
     during garbage collection or subsequent use.
 
@@ -108,7 +108,7 @@ def _run_async(coro):
         loop = None
 
     if loop and loop.is_running():
-        # Inside an async context (gateway, RL env) — run in a fresh thread.
+        # Inside an async context (gateway, RL env) - run in a fresh thread.
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(asyncio.run, coro)
@@ -118,7 +118,7 @@ def _run_async(coro):
     # delegate_task), use a per-thread persistent loop.  This avoids
     # contention with the main thread's shared loop while keeping cached
     # httpx/AsyncOpenAI clients bound to a live loop for the thread's
-    # lifetime — preventing "Event loop is closed" on GC cleanup.
+    # lifetime - preventing "Event loop is closed" on GC cleanup.
     if threading.current_thread() is not threading.main_thread():
         worker_loop = _get_worker_loop()
         return worker_loop.run_until_complete(coro)
@@ -260,15 +260,15 @@ def get_tool_definitions(
                 resolved = resolve_toolset(toolset_name)
                 tools_to_include.update(resolved)
                 if not quiet_mode:
-                    print(f"✅ Enabled toolset '{toolset_name}': {', '.join(resolved) if resolved else 'no tools'}")
+                    logger.info("Enabled toolset '%s': %s", toolset_name, ', '.join(resolved) if resolved else 'no tools')
             elif toolset_name in _LEGACY_TOOLSET_MAP:
                 legacy_tools = _LEGACY_TOOLSET_MAP[toolset_name]
                 tools_to_include.update(legacy_tools)
                 if not quiet_mode:
-                    print(f"✅ Enabled legacy toolset '{toolset_name}': {', '.join(legacy_tools)}")
+                    logger.info("Enabled legacy toolset '%s': %s", toolset_name, ', '.join(legacy_tools))
             else:
                 if not quiet_mode:
-                    print(f"⚠️  Unknown toolset: {toolset_name}")
+                    logger.warning("Unknown toolset: %s", toolset_name)
 
     elif disabled_toolsets:
         from toolsets import get_all_toolsets
@@ -280,23 +280,23 @@ def get_tool_definitions(
                 resolved = resolve_toolset(toolset_name)
                 tools_to_include.difference_update(resolved)
                 if not quiet_mode:
-                    print(f"🚫 Disabled toolset '{toolset_name}': {', '.join(resolved) if resolved else 'no tools'}")
+                    logger.info("Disabled toolset '%s': %s", toolset_name, ', '.join(resolved) if resolved else 'no tools')
             elif toolset_name in _LEGACY_TOOLSET_MAP:
                 legacy_tools = _LEGACY_TOOLSET_MAP[toolset_name]
                 tools_to_include.difference_update(legacy_tools)
                 if not quiet_mode:
-                    print(f"🚫 Disabled legacy toolset '{toolset_name}': {', '.join(legacy_tools)}")
+                    logger.info("Disabled legacy toolset '%s': %s", toolset_name, ', '.join(legacy_tools))
             else:
                 if not quiet_mode:
-                    print(f"⚠️  Unknown toolset: {toolset_name}")
+                    logger.warning("Unknown toolset: %s", toolset_name)
     else:
         from toolsets import get_all_toolsets
         for ts_name in get_all_toolsets():
             tools_to_include.update(resolve_toolset(ts_name))
 
     # Plugin-registered tools are now resolved through the normal toolset
-    # path — validate_toolset() / resolve_toolset() / get_all_toolsets()
-    # all check the tool registry for plugin-provided toolsets.  No bypass
+    # path - validate_toolset() / resolve_toolset() / get_all_toolsets()
+    # all check the tool registry for plugin-provided toolsets. No bypass
     # needed; plugins respect enabled_toolsets / disabled_toolsets like any
     # other toolset.
 
@@ -305,7 +305,7 @@ def get_tool_definitions(
 
     # The set of tool names that actually passed check_fn filtering.
     # Use this (not tools_to_include) for any downstream schema that references
-    # other tools by name — otherwise the model sees tools mentioned in
+    # other tools by name - otherwise the model sees tools mentioned in
     # descriptions that don't actually exist, and hallucinates calls to them.
     available_tool_names = {t["function"]["name"] for t in filtered_tools}
 
@@ -345,9 +345,9 @@ def get_tool_definitions(
     if not quiet_mode:
         if filtered_tools:
             tool_names = [t["function"]["name"] for t in filtered_tools]
-            print(f"🛠️  Final tool selection ({len(filtered_tools)} tools): {', '.join(tool_names)}")
+            logger.info("Final tool selection (%d tools): %s", len(filtered_tools), ', '.join(tool_names))
         else:
-            print("🛠️  No tools selected (all filtered out or unavailable)")
+            logger.info("No tools selected (all filtered out or unavailable)")
 
     global _last_resolved_tool_names
     _last_resolved_tool_names = [t["function"]["name"] for t in filtered_tools]
