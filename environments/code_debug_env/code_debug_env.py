@@ -142,6 +142,7 @@ class CodeDebugEnv(HermesAgentBaseEnv):
             use_wandb=True,
             wandb_name="code-debug-agent",
             ensure_scores_are_not_same=False,
+            extra_body={"atropos_inhibit_tools": True},
         )
 
         server_configs = [
