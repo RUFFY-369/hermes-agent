@@ -45,6 +45,6 @@ env:
 openai:
   base_url: "http://localhost:9001/v1"
   model_name: "NousResearch/DeepHermes-3-Llama-3-8B-Preview"
-  server_type: "openai"
+  server_type: "vllm"
   api_key: "x"
   health_check: false
