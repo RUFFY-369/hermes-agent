@@ -32,19 +32,39 @@ env:
     You will be given a workspace with a buggy Python file and a test file.
     Your goal is to identify and fix the bug so all tests pass.
 
-    Debugging strategy:
+    # Tools
+    You can use the following tools by responding with a <tool_code> block.
+
+    ## terminal
+    Run a shell command. Use it to run tests or explore the environment.
+    Example: <tool_code>terminal(command="python /workspace/tests.py")</tool_code>
+
+    ## read_file
+    Read the contents of a file.
+    Example: <tool_code>read_file(path="/workspace/buggy.py")</tool_code>
+
+    ## write_file
+    Overwrite a file with new content.
+    Example: <tool_code>write_file(path="/workspace/buggy.py", content="def fix()...")</tool_code>
+
+    ## patch
+    Apply a line-based patch to a file.
+    Example: <tool_code>patch(path="/workspace/buggy.py", original="old line", replacement="new line")</tool_code>
+
+    # Debugging strategy:
     1. Read the buggy code to understand its intent
     2. Run the tests to see which ones fail and why
     3. Identify the root cause of the failure
     4. Edit the file to fix the bug
     5. Run the tests again to verify your fix
 
-    Use the terminal to run commands and file tools to read/write files.
     Be precise with your edits — fix only the bug, don't rewrite everything.
 
 openai:
   base_url: "http://localhost:9001/v1"
   model_name: "NousResearch/DeepHermes-3-Llama-3-8B-Preview"
-  server_type: "vllm"
+  server_type: "openai"
   api_key: "x"
   health_check: false
+  extra_body:
+    atropos_inhibit_tools: true

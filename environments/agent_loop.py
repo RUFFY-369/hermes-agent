@@ -214,6 +214,11 @@ class HermesAgentLoop:
             # Inject extra_body for provider-specific params (e.g., OpenRouter
             # provider preferences like banned/preferred providers, transforms)
             if self.extra_body:
+                # Custom atropos extension: inhibit sending tools= to the server
+                # (Used to bypass buggy server-side tool parsing in vLLM 0.6.5)
+                if self.extra_body.get("atropos_inhibit_tools"):
+                    chat_kwargs.pop("tools", None)
+                
                 chat_kwargs["extra_body"] = self.extra_body
 
             # Make the API call -- standard OpenAI spec
