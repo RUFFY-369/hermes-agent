@@ -36,17 +36,4 @@ class MockMTGRPOEnv(HermesAgentBaseEnv, TurnLevelRewardMixin):
         pass
 
 if __name__ == "__main__":
-    # Test execution
-    from atroposlib.envs.server_handling.server_manager import APIServerConfig
-    
-    config = HermesAgentEnvConfig(
-        dataset_name="test",
-        group_size=1,
-        max_agent_turns=2,
-        data_path_to_save_groups="test_mt_grpo.jsonl"
-    )
-    
-    # We can't easily run the full loop here without a vLLM server,
-    # but we can verify the class structure and mixin detection.
-    env = MockMTGRPOEnv(config)
-    print(f"Is TurnLevelRewardMixin? {isinstance(env, TurnLevelRewardMixin)}")
+    MockMTGRPOEnv.cli()
