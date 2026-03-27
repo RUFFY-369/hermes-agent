@@ -24,6 +24,8 @@ import json
 import asyncio
 import logging
 import threading
+import uuid
+import re
 from typing import Dict, Any, List, Optional, Tuple
 
 from tools.registry import registry
@@ -470,3 +472,83 @@ def check_toolset_requirements() -> Dict[str, bool]:
 def check_tool_availability(quiet: bool = False) -> Tuple[List[str], List[dict]]:
     """Return (available_toolsets, unavailable_info)."""
     return registry.check_tool_availability(quiet=quiet)
+
+
+# =============================================================================
+# Fallback Tool Parsing (for Universal Tool Strategy) 
+# =============================================================================
+
+def parse_tool_calls_from_text(text: str) -> Tuple[List[Any], Optional[str]]:
+    """
+    Extract tool calls from raw assistant text using <tool_code> tags.
+    Returns (list_of_tool_calls, cleaned_content).
+    
+    Format example:
+    <tool_code>read_file(path="/workspace/buggy.py")</tool_code>
+    """
+    import re
+    import ast
+    from atroposlib.type_definitions import ToolCall, FunctionCall
+
+    # 1. Regex to find <tool_code>...</tool_code> blocks (including multiline)
+    # Also handles cases where the model writes the function call directly without brackets
+    pattern = re.compile(r"<tool_code>(.*?)</tool_code>", re.DOTALL)
+    matches = pattern.findall(text)
+    
+    if not matches:
+        # Fallback: look for direct XML tags like <read_file(path="...")> 
+        # which some models hallucinate when told about tool names
+        xml_fallback = re.compile(r"<(read_file|write_file|patch|terminal)\((.*?)\)>", re.DOTALL)
+        for tool, args in xml_fallback.findall(text):
+            matches.append(f"{tool}({args})")
+
+    if not matches:
+        return [], None
+
+    tool_calls = []
+    cleaned_text = text
+    
+    for match in matches:
+        content = match.strip()
+        # Remove the match from the content so users don't see the raw tags as often
+        cleaned_text = cleaned_text.replace(f"<tool_code>{match}</tool_code>", "")
+        
+        try:
+            # Parse function_name(arg1="val", ...)
+            fn_call_pattern = re.compile(r"^(\w+)\((.*)\)$", re.DOTALL)
+            fn_match = fn_call_pattern.match(content)
+            
+            if fn_match:
+                name = fn_match.group(1)
+                args_str = fn_match.group(2)
+                
+                # Use AST to safely parse the arguments string into a dict
+                # We wrap it in a dict constructor to handle the kwarg format
+                try:
+                    # Parse as a dummy function call to extract keywords
+                    tree = ast.parse(f"stub({args_str})")
+                    call_node = tree.body[0].value
+                    args = {kw.arg: ast.literal_eval(kw.value) for kw in call_node.keywords}
+                except Exception:
+                    # Fallback for messy arguments: try to find key="value" pattern
+                    args = {}
+                    arg_pairs = re.findall(r'(\w+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')', args_str)
+                    for k, v1, v2 in arg_pairs:
+                        args[k] = v1 or v2
+
+                # Create a pseudo-unique ID for the tool call
+                tc_id = f"call_{uuid.uuid4().hex[:8]}"
+                
+                tool_calls.append(ToolCall(
+                    id=tc_id,
+                    type="function" if hasattr(ToolCall, "type") else None, # Compatibility
+                    function=FunctionCall(
+                        name=name,
+                        arguments=json.dumps(args)
+                    )
+                ))
+        except Exception as e:
+            logger.warning("Failed to parse tool call content '%s': %s", content, e)
+            continue
+
+    return tool_calls, cleaned_text
