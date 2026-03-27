@@ -285,11 +285,11 @@ class HermesAgentLoop:
                             len(parsed_calls_dicts),
                         )
                 except Exception as e:
-                    logger.error("❌ Fallback parser error: %s", e)
+                    logger.error("Fallback parser error: %s", e)
                     pass  # Fall through to no tool calls
 
             if assistant_msg.tool_calls:
-                # Normalize tool calls to dicts — they may come as objects
+                # Normalize tool calls to dicts - they may come as objects
                 # (OpenAI API) or dicts (vLLM ToolCallTranslator).
                 def _tc_to_dict(tc):
                     if isinstance(tc, dict):

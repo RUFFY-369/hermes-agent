@@ -219,9 +219,9 @@ class HermesAgentBaseEnv(BaseEnv):
             os.environ["TERMINAL_ENV"] = config.terminal_backend
         os.environ["TERMINAL_TIMEOUT"] = str(config.terminal_timeout)
         os.environ["TERMINAL_LIFETIME_SECONDS"] = str(config.terminal_lifetime)
-        print(
-            f"🖥️  Terminal: backend={config.terminal_backend}, "
-            f"timeout={config.terminal_timeout}s, lifetime={config.terminal_lifetime}s"
+        logger.info(
+            "Terminal: backend=%s, timeout=%ds, lifetime=%ds",
+            config.terminal_backend, config.terminal_timeout, config.terminal_lifetime
         )
 
         # Resize the agent loop's thread pool for tool execution.
@@ -231,10 +231,10 @@ class HermesAgentBaseEnv(BaseEnv):
         resize_tool_pool(config.tool_pool_size)
 
         # Set tool_parser on the ServerManager so ManagedServer uses it
-        # for bidirectional tool call translation (raw text ↔ OpenAI tool_calls).
+        # for bidirectional tool call translation (raw text <-> OpenAI tool_calls).
         if hasattr(self.server, 'tool_parser'):
             self.server.tool_parser = config.tool_call_parser
-            print(f"🔧 Tool parser: {config.tool_call_parser}")
+            logger.info("Tool parser: %s", config.tool_call_parser)
 
         # Current group's resolved tools (set in collect_trajectories)
         self._current_group_tools: Optional[Tuple[List[Dict], Set[str]]] = None
@@ -438,7 +438,7 @@ class HermesAgentBaseEnv(BaseEnv):
 
             # Also print to stdout for immediate visibility
             for summary in error_summaries:
-                print(f"  Tool Error: {summary}")
+                logger.info("  Tool Error: %s", summary)
 
             self._tool_error_buffer = []
         else:

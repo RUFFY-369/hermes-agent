@@ -58,7 +58,7 @@ env:
     4. Edit the file to fix the bug
     5. Run the tests again to verify your fix
 
-    Be precise with your edits — fix only the bug, don't rewrite everything.
+    Be precise with your edits - fix only the bug, don't rewrite everything.
 
 openai:
   base_url: "http://localhost:9001/v1"
