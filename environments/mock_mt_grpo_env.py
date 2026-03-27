@@ -21,6 +21,9 @@ class MockMTGRPOEnv(HermesAgentBaseEnv, TurnLevelRewardMixin):
         env_config.data_path_to_save_groups = "mt_grpo_test.jsonl"
         
         # Point to the active vLLM server and enable stabilization
+        # Need to set extra_body here so HermesAgentBaseEnv passes it to the agent loop
+        env_config.extra_body = {"atropos_inhibit_tools": True}
+        
         server_configs = [
             APIServerConfig(
                 base_url="http://localhost:9001/v1",
