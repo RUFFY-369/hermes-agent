@@ -7,12 +7,13 @@ from typing import Any, Dict, List
 from environments.hermes_base_env import HermesAgentBaseEnv, HermesAgentEnvConfig
 from environments.turn_level_reward import TurnLevelRewardMixin
 from atroposlib.type_definitions import Item
+from atroposlib.envs.server_handling.server_manager import APIServerConfig
 
 class MockMTGRPOEnv(HermesAgentBaseEnv, TurnLevelRewardMixin):
     @classmethod
     def config_init(cls):
         """Override config initialization to set defaults for testing."""
-        env_config, server_configs = super().config_init()
+        env_config, _ = super().config_init()
         
         # Set defaults to avoid long CLI strings
         env_config.max_agent_turns = 2
@@ -20,8 +21,14 @@ class MockMTGRPOEnv(HermesAgentBaseEnv, TurnLevelRewardMixin):
         env_config.data_path_to_save_groups = "mt_grpo_test.jsonl"
         
         # Point to the active vLLM server and enable stabilization
-        server_configs.base_url = "http://localhost:9001/v1"
-        server_configs.extra_body = {"atropos_inhibit_tools": True}
+        server_configs = [
+            APIServerConfig(
+                base_url="http://localhost:9001/v1",
+                model_name="NousResearch/DeepHermes-3-Llama-3-8B-Preview",
+                server_type="openai",
+                extra_body={"atropos_inhibit_tools": True}
+            )
+        ]
         
         return env_config, server_configs
 
