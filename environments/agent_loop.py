@@ -272,27 +272,15 @@ class HermesAgentLoop:
             ):
                 try:
                     from model_tools import parse_tool_calls_from_text
-                    from atroposlib.type_definitions import ToolCall, FunctionCall
                     
                     parsed_calls_dicts, parsed_content = parse_tool_calls_from_text(
                         assistant_msg.content
                     )
                     if parsed_calls_dicts:
-                        parsed_calls = []
-                        for tc in parsed_calls_dicts:
-                            parsed_calls.append(ToolCall(
-                                id=tc["id"],
-                                type="function" if hasattr(ToolCall, "type") else None,
-                                function=FunctionCall(
-                                    name=tc["name"],
-                                    arguments=tc["arguments"]
-                                )
-                            ))
-                        
-                        assistant_msg.tool_calls = parsed_calls
+                        assistant_msg.tool_calls = parsed_calls_dicts
                         if parsed_content is not None:
                             assistant_msg.content = parsed_content
-                        print(f"✅ Found {len(parsed_calls)} tool calls via fallback parser")
+                        print(f"✅ Found {len(parsed_calls_dicts)} tool calls via fallback parser")
                         logger.debug(
                             "Fallback parser extracted %d tool calls from raw content",
                             len(parsed_calls),
