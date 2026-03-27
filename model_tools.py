@@ -487,7 +487,6 @@ def parse_tool_calls_from_text(text: str) -> Tuple[List[Any], Optional[str]]:
     import ast
     import json
     import uuid
-    from atroposlib.type_definitions import ToolCall, FunctionCall
 
     tool_calls = []
     cleaned_text = text
@@ -529,11 +528,11 @@ def parse_tool_calls_from_text(text: str) -> Tuple[List[Any], Optional[str]]:
                         elif val.isdigit(): val = int(val)
                         args[k] = val
 
-            tool_calls.append(ToolCall(
-                id=f"call_{uuid.uuid4().hex[:8]}",
-                type="function" if hasattr(ToolCall, "type") else None,
-                function=FunctionCall(name=name, arguments=json.dumps(args))
-            ))
+            tool_calls.append({
+                "id": f"call_{uuid.uuid4().hex[:8]}",
+                "name": name,
+                "arguments": json.dumps(args)
+            })
 
     # --- Pattern 2: Tool-Name-as-Tag Hallucinations (e.g. <read_file path="...">) ---
     # Common tools the model often hallucinates tags for
@@ -565,10 +564,10 @@ def parse_tool_calls_from_text(text: str) -> Tuple[List[Any], Optional[str]]:
         for k, v1, v2, v3 in attr_pairs:
             args[k] = v1 or v2 or v3
 
-        tool_calls.append(ToolCall(
-            id=f"call_{uuid.uuid4().hex[:8]}",
-            type="function" if hasattr(ToolCall, "type") else None,
-            function=FunctionCall(name=name, arguments=json.dumps(args))
-        ))
+        tool_calls.append({
+            "id": f"call_{uuid.uuid4().hex[:8]}",
+            "name": name,
+            "arguments": json.dumps(args)
+        })
 
     return tool_calls, cleaned_text
