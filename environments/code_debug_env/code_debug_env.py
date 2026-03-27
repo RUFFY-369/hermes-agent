@@ -42,11 +42,10 @@ _repo_root = Path(__file__).resolve().parent.parent.parent
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
-from datasets import load_dataset
-
 from atroposlib.envs.base import ScoredDataGroup
 from atroposlib.envs.server_handling.server_manager import APIServerConfig
 from atroposlib.type_definitions import Item
+from datasets import load_dataset
 
 from environments.agent_loop import AgentResult
 from environments.hermes_base_env import HermesAgentBaseEnv, HermesAgentEnvConfig
@@ -187,7 +186,7 @@ class CodeDebugEnv(HermesAgentBaseEnv):
         split_idx = int(len(all_items) * 0.8)
         self.train = all_items[:split_idx]
         self.test = all_items[split_idx:]
- 
+
         logger.info("Train: %d, Test: %d", len(self.train), len(self.test))
         self.iter = 0
 
@@ -266,8 +265,12 @@ class CodeDebugEnv(HermesAgentBaseEnv):
         except Exception as e:
             logger.error("Failed to scaffold workspace: %s", e)
             ctx.cleanup()
-            return {"tokens": list(range(128)), "masks": [-100] + list(range(1, 128)),
-                    "scores": 0.0, "messages": []}, []
+            return {
+                "tokens": list(range(128)),
+                "masks": [-100] + list(range(1, 128)),
+                "scores": 0.0,
+                "messages": [],
+            }, []
 
         # --- Run the agent loop (reuse parent logic but with our task_id) ---
         from environments.agent_loop import HermesAgentLoop
@@ -337,13 +340,15 @@ class CodeDebugEnv(HermesAgentBaseEnv):
         # Track tool errors
         if result.tool_errors:
             for err in result.tool_errors:
-                self._tool_error_buffer.append({
-                    "turn": err.turn,
-                    "tool": err.tool_name,
-                    "args": err.arguments[:150],
-                    "error": err.error[:300],
-                    "result": err.tool_result[:300],
-                })
+                self._tool_error_buffer.append(
+                    {
+                        "turn": err.turn,
+                        "tool": err.tool_name,
+                        "args": err.arguments[:150],
+                        "error": err.error[:300],
+                        "result": err.tool_result[:300],
+                    }
+                )
 
         # Cleanup the sandbox
         ctx.cleanup()
@@ -413,28 +418,32 @@ class CodeDebugEnv(HermesAgentBaseEnv):
             if msg.get("role") == "assistant":
                 for tc in msg.get("tool_calls", []):
                     func = tc.get("function", {})
-                    tool_calls_made.append({
-                        "name": func.get("name", ""),
-                        "args": func.get("arguments", ""),
-                    })
+                    tool_calls_made.append(
+                        {
+                            "name": func.get("name", ""),
+                            "args": func.get("arguments", ""),
+                        }
+                    )
 
         # Check if agent read the buggy file
         read_file = any(
-            tc["name"] in ("read_file", "terminal")
-            and "buggy.py" in tc["args"]
+            tc["name"] in ("read_file", "terminal") and "buggy.py" in tc["args"]
             for tc in tool_calls_made
         )
         # Check if agent ran tests at any point
         ran_tests = any(
-            tc["name"] == "terminal"
-            and "tests.py" in tc["args"]
+            tc["name"] == "terminal" and "tests.py" in tc["args"]
             for tc in tool_calls_made
         )
         # Check if agent edited the file
         edited_file = any(
             tc["name"] in ("write_file", "patch_file", "terminal")
-            and ("buggy.py" in tc["args"] and tc["name"] != "terminal"
-                 or "buggy.py" in tc["args"] and ">" in tc["args"])
+            and (
+                "buggy.py" in tc["args"]
+                and tc["name"] != "terminal"
+                or "buggy.py" in tc["args"]
+                and ">" in tc["args"]
+            )
             for tc in tool_calls_made
         )
 
@@ -493,15 +502,15 @@ class CodeDebugEnv(HermesAgentBaseEnv):
             wandb_metrics["train/test_pass_rate"] = sum(
                 1 for t in self.test_pass_buffer if t == 1.0
             ) / max(len(self.test_pass_buffer), 1)
-            wandb_metrics["train/avg_test_signal"] = sum(
-                self.test_pass_buffer
-            ) / max(len(self.test_pass_buffer), 1)
-            wandb_metrics["train/avg_diagnosis"] = sum(
-                self.diagnosis_buffer
-            ) / max(len(self.diagnosis_buffer), 1)
-            wandb_metrics["train/avg_efficiency"] = sum(
-                self.efficiency_buffer
-            ) / max(len(self.efficiency_buffer), 1)
+            wandb_metrics["train/avg_test_signal"] = sum(self.test_pass_buffer) / max(
+                len(self.test_pass_buffer), 1
+            )
+            wandb_metrics["train/avg_diagnosis"] = sum(self.diagnosis_buffer) / max(
+                len(self.diagnosis_buffer), 1
+            )
+            wandb_metrics["train/avg_efficiency"] = sum(self.efficiency_buffer) / max(
+                len(self.efficiency_buffer), 1
+            )
 
             self.reward_buffer = []
             self.test_pass_buffer = []
