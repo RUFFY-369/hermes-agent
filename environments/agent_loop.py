@@ -252,6 +252,7 @@ class HermesAgentLoop:
                 )
 
             assistant_msg = response.choices[0].message
+            print(f"\n--- [TURN {turn + 1}] Assistant Response ---\n{assistant_msg.content}\n----------------------------------")
 
             # Extract reasoning content from the response (all provider formats)
             reasoning = _extract_reasoning_from_message(assistant_msg)
@@ -279,11 +280,13 @@ class HermesAgentLoop:
                         assistant_msg.tool_calls = parsed_calls
                         if parsed_content is not None:
                             assistant_msg.content = parsed_content
+                        print(f"✅ Found {len(parsed_calls)} tool calls via fallback parser")
                         logger.debug(
                             "Fallback parser extracted %d tool calls from raw content",
                             len(parsed_calls),
                         )
-                except Exception:
+                except Exception as e:
+                    print(f"❌ Fallback parser error: {e}")
                     pass  # Fall through to no tool calls
 
             if assistant_msg.tool_calls:
