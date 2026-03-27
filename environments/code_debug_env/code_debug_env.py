@@ -151,6 +151,7 @@ class CodeDebugEnv(HermesAgentBaseEnv):
                 server_type="openai",
                 api_key="x",
                 health_check=False,
+                extra_body={"atropos_inhibit_tools": True},
             )
         ]
 
