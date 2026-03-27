@@ -9,28 +9,45 @@ from environments.turn_level_reward import TurnLevelRewardMixin
 from atroposlib.type_definitions import Item
 
 class MockMTGRPOEnv(HermesAgentBaseEnv, TurnLevelRewardMixin):
+    @classmethod
+    def config_init(cls):
+        """Override config initialization to set defaults for testing."""
+        env_config, server_configs = super().config_init()
+        
+        # Set defaults to avoid long CLI strings
+        env_config.max_agent_turns = 2
+        env_config.group_size = 1
+        env_config.data_path_to_save_groups = "mt_grpo_test.jsonl"
+        
+        # Point to the active vLLM server and enable stabilization
+        server_configs.base_url = "http://localhost:9001/v1"
+        server_configs.extra_body = {"atropos_inhibit_tools": True}
+        
+        return env_config, server_configs
+
     async def setup(self):
-        # Dummy dataset
-        self.dataset = [{"prompt": "Hello", "task_id": "test_1"}]
+        # Dummy dataset for sampling
+        self.dataset = [{"prompt": "Tell me a joke.", "task_id": "test_1"}]
         self.iter = 0
 
     async def get_next_item(self) -> Item:
-        item = self.dataset[self.iter % len(self.dataset)]
-        self.iter += 1
+        item = self.dataset[0]
         return item
 
     def format_prompt(self, item: Item) -> str:
         return item["prompt"]
 
     async def compute_reward(self, item: Item, result: Any, ctx: Any) -> float:
-        # Should not be called because we are using TurnLevelRewardMixin
-        return 0.0
+        # Fallback for non-mixin calls
+        return 0.5
 
     async def compute_turn_rewards(self, item: Item, result: Any, ctx: Any) -> List[float]:
-        # Count assistant turns
+        # Count assistant turns and return one reward per turn
         assistant_turns = sum(1 for msg in result.messages if msg["role"] == "assistant")
-        print(f"DEBUG: Found {assistant_turns} assistant turns. Returning list of 1.0s.")
-        return [1.0] * assistant_turns
+        print(f"\n[DEBUG] PR 2 Verification: Found {assistant_turns} assistant turns.")
+        rewards = [float(i + 1) for i in range(assistant_turns)]
+        print(f"[DEBUG] Returning turn rewards: {rewards}")
+        return rewards
 
     async def evaluate(self, *args, **kwargs):
         pass
