@@ -218,6 +218,7 @@ class HermesAgentLoop:
                 # (Used to bypass buggy server-side tool parsing in vLLM 0.6.5)
                 if self.extra_body.get("atropos_inhibit_tools"):
                     chat_kwargs.pop("tools", None)
+                    chat_kwargs["tool_choice"] = "none"
                 
                 chat_kwargs["extra_body"] = self.extra_body
 
