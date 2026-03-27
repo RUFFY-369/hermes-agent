@@ -62,6 +62,7 @@ from atroposlib.type_definitions import Item
 
 from environments.agent_loop import AgentResult, HermesAgentLoop
 from environments.tool_context import ToolContext
+from environments.turn_level_reward import TurnLevelRewardMixin
 
 # Import hermes-agent toolset infrastructure
 from model_tools import get_tool_definitions
@@ -539,9 +540,12 @@ class HermesAgentBaseEnv(BaseEnv):
             # Compute reward using ToolContext (gives verifier full tool access)
             ctx = ToolContext(task_id)
             try:
-                reward = await self.compute_reward(item, result, ctx)
+                if isinstance(self, TurnLevelRewardMixin):
+                    reward = await self.compute_turn_rewards(item, result, ctx)
+                else:
+                    reward = await self.compute_reward(item, result, ctx)
             except Exception as e:
-                logger.error("compute_reward failed: %s", e)
+                logger.error("reward computation failed: %s", e)
                 reward = 0.0
             finally:
                 ctx.cleanup()
