@@ -268,12 +268,11 @@ class HermesAgentLoop:
                 not assistant_msg.tool_calls
                 and assistant_msg.content
                 and self.tool_schemas
-                and "<tool_call>" in (assistant_msg.content or "")
+                and ("<tool_code>" in assistant_msg.content or "<tool_call>" in assistant_msg.content)
             ):
                 try:
-                    from environments.tool_call_parsers import get_parser
-                    fallback_parser = get_parser("hermes")
-                    parsed_content, parsed_calls = fallback_parser.parse(
+                    from model_tools import parse_tool_calls_from_text
+                    parsed_calls, parsed_content = parse_tool_calls_from_text(
                         assistant_msg.content
                     )
                     if parsed_calls:

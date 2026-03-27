@@ -480,75 +480,95 @@ def check_tool_availability(quiet: bool = False) -> Tuple[List[str], List[dict]]
 
 def parse_tool_calls_from_text(text: str) -> Tuple[List[Any], Optional[str]]:
     """
-    Extract tool calls from raw assistant text using <tool_code> tags.
+    Extract tool calls from raw assistant text using multiple fallback patterns.
     Returns (list_of_tool_calls, cleaned_content).
-    
-    Format example:
-    <tool_code>read_file(path="/workspace/buggy.py")</tool_code>
     """
     import re
     import ast
+    import json
+    import uuid
     from atroposlib.type_definitions import ToolCall, FunctionCall
-
-    # 1. Regex to find <tool_code>...</tool_code> blocks (including multiline)
-    # Also handles cases where the model writes the function call directly without brackets
-    pattern = re.compile(r"<tool_code>(.*?)</tool_code>", re.DOTALL)
-    matches = pattern.findall(text)
-    
-    if not matches:
-        # Fallback: look for direct XML tags like <read_file(path="...")> 
-        # which some models hallucinate when told about tool names
-        xml_fallback = re.compile(r"<(read_file|write_file|patch|terminal)\((.*?)\)>", re.DOTALL)
-        for tool, args in xml_fallback.findall(text):
-            matches.append(f"{tool}({args})")
-
-    if not matches:
-        return [], None
 
     tool_calls = []
     cleaned_text = text
-    
-    for match in matches:
-        content = match.strip()
-        # Remove the match from the content so users don't see the raw tags as often
-        cleaned_text = cleaned_text.replace(f"<tool_code>{match}</tool_code>", "")
+
+    # --- Pattern 1: <tool_code>...</tool_code> or <tool_call>...</tool_call> ---
+    # These can contain comments and multiple function calls.
+    tag_pattern = re.compile(r"<(tool_code|tool_call)>(.*?)</\1>", re.DOTALL)
+    for tag_match in tag_pattern.finditer(text):
+        full_tag_text = tag_match.group(0)
+        inner_content = tag_match.group(2)
         
-        try:
-            # Parse function_name(arg1="val", ...)
-            fn_call_pattern = re.compile(r"^(\w+)\((.*)\)$", re.DOTALL)
-            fn_match = fn_call_pattern.match(content)
-            
-            if fn_match:
-                name = fn_match.group(1)
-                args_str = fn_match.group(2)
-                
-                # Use AST to safely parse the arguments string into a dict
-                # We wrap it in a dict constructor to handle the kwarg format
+        # Remove from cleaned text
+        cleaned_text = cleaned_text.replace(full_tag_text, "")
+
+        # Find all function_name(args) patterns inside the tag
+        # We look for something that looks like a function call
+        fn_pattern = re.compile(r"(\w+)\((.*?)\)", re.DOTALL)
+        for fn_match in fn_pattern.finditer(inner_content):
+            name = fn_match.group(1)
+            args_str = fn_match.group(2)
+
+            # Try to parse arguments
+            args = {}
+            if args_str.strip():
                 try:
-                    # Parse as a dummy function call to extract keywords
+                    # Attempt safe AST evaluation of keyword arguments
+                    # We wrap it in a stub to use the AST parser's call handling
                     tree = ast.parse(f"stub({args_str})")
                     call_node = tree.body[0].value
                     args = {kw.arg: ast.literal_eval(kw.value) for kw in call_node.keywords}
                 except Exception:
-                    # Fallback for messy arguments: try to find key="value" pattern
-                    args = {}
-                    arg_pairs = re.findall(r'(\w+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')', args_str)
-                    for k, v1, v2 in arg_pairs:
-                        args[k] = v1 or v2
+                    # Fallback: simple key="value" or key='value' regex
+                    arg_pairs = re.findall(r'(\w+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^,\s\)]+))', args_str)
+                    for k, v1, v2, v3 in arg_pairs:
+                        val = v1 or v2 or v3
+                        # Try to convert to int/float if possible
+                        if val.lower() == "true": val = True
+                        elif val.lower() == "false": val = False
+                        elif val.isdigit(): val = int(val)
+                        args[k] = val
 
-                # Create a pseudo-unique ID for the tool call
-                tc_id = f"call_{uuid.uuid4().hex[:8]}"
-                
-                tool_calls.append(ToolCall(
-                    id=tc_id,
-                    type="function" if hasattr(ToolCall, "type") else None, # Compatibility
-                    function=FunctionCall(
-                        name=name,
-                        arguments=json.dumps(args)
-                    )
-                ))
-        except Exception as e:
-            logger.warning("Failed to parse tool call content '%s': %s", content, e)
-            continue
+            tool_calls.append(ToolCall(
+                id=f"call_{uuid.uuid4().hex[:8]}",
+                type="function" if hasattr(ToolCall, "type") else None,
+                function=FunctionCall(name=name, arguments=json.dumps(args))
+            ))
+
+    # --- Pattern 2: Tool-Name-as-Tag Hallucinations (e.g. <read_file path="...">) ---
+    # Common tools the model often hallucinates tags for
+    known_tools = r"(read_file|write_file|patch|terminal|execute_code|ls|search_files)"
+    xml_tool_pattern = re.compile(rf"<{known_tools}\s+(.*?)/*>", re.DOTALL)
+    
+    for xml_match in xml_tool_pattern.finditer(cleaned_text):
+        name = xml_match.group(1)
+        attr_str = xml_match.group(2)
+        
+        # Check if there's a closing tag like </read_file> nearby
+        closing_tag = f"</{name}>"
+        full_match_text = xml_match.group(0)
+        
+        if closing_tag in cleaned_text:
+            # Multi-line XML: <read_file path="..."> [content] </read_file>
+            # We'll just take the attributes for now as they usually contain the path
+            end_pos = cleaned_text.find(closing_tag) + len(closing_tag)
+            # This is complex to replace correctly, so we just remove the start tag for now
+            cleaned_text = cleaned_text.replace(full_match_text, "")
+            cleaned_text = cleaned_text.replace(closing_tag, "")
+        else:
+            # Single-line XML: <read_file path="..."/>
+            cleaned_text = cleaned_text.replace(full_match_text, "")
+
+        # Parse attributes (path="/foo", original="bar", etc.)
+        args = {}
+        attr_pairs = re.findall(r'(\w+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^,\s\>]+))', attr_str)
+        for k, v1, v2, v3 in attr_pairs:
+            args[k] = v1 or v2 or v3
+
+        tool_calls.append(ToolCall(
+            id=f"call_{uuid.uuid4().hex[:8]}",
+            type="function" if hasattr(ToolCall, "type") else None,
+            function=FunctionCall(name=name, arguments=json.dumps(args))
+        ))
 
     return tool_calls, cleaned_text
