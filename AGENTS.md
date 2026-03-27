@@ -38,6 +38,7 @@ hermes-agent/
 │   ├── tools_config.py   # `hermes tools` — enable/disable tools per platform
 │   ├── skills_hub.py     # `/skills` slash command (search, browse, install)
 │   ├── models.py         # Model catalog, provider model lists
+│   ├── model_switch.py   # Shared /model switch pipeline (CLI + gateway)
 │   └── auth.py           # Provider credential resolution
 ├── tools/                # Tool implementations (one file per tool)
 │   ├── registry.py       # Central tool registry (schemas, handlers, dispatch)
@@ -172,6 +173,7 @@ if canonical == "mycommand":
 - `args_hint` — argument placeholder shown in help (e.g. `"<prompt>"`, `"[name]"`)
 - `cli_only` — only available in the interactive CLI
 - `gateway_only` — only available in messaging platforms
+- `gateway_config_gate` — config dotpath (e.g. `"display.tool_progress_command"`); when set on a `cli_only` command, the command becomes available in the gateway if the config value is truthy. `GATEWAY_KNOWN_COMMANDS` always includes config-gated commands so the gateway can dispatch them; help/menus only show them when the gate is open.
 
 **Adding an alias** requires only adding it to the `aliases` tuple on the existing `CommandDef`. No other file changes needed — dispatch, help text, Telegram menu, Slack mapping, and autocomplete all update automatically.
 
