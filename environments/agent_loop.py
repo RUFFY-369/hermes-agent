@@ -283,7 +283,7 @@ class HermesAgentLoop:
                         print(f"✅ Found {len(parsed_calls_dicts)} tool calls via fallback parser")
                         logger.debug(
                             "Fallback parser extracted %d tool calls from raw content",
-                            len(parsed_calls),
+                            len(parsed_calls_dicts),
                         )
                 except Exception as e:
                     print(f"❌ Fallback parser error: {e}")
