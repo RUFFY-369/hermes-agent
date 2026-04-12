@@ -50,10 +50,45 @@ _OPENCLAW_SCRIPT_INSTALLED = (
 )
 
 # Known OpenClaw directory names (current + legacy)
-_OPENCLAW_DIR_NAMES = (".openclaw", ".clawdbot", ".moldbot")
+_OPENCLAW_DIR_NAMES = (".openclaw", ".clawdbot", ".moltbot")
 
-# State files commonly found in OpenClaw workspace directories that cause
-# confusion after migration (the agent discovers them and writes to them)
+def _warn_if_gateway_running(auto_yes: bool) -> None:
+    """Check if a Hermes gateway is running with connected platforms.
+
+    Migrating bot tokens while the gateway is polling will cause conflicts
+    (e.g. Telegram 409 "terminated by other getUpdates request"). Warn the
+    user and let them decide whether to continue.
+    """
+    from gateway.status import get_running_pid, read_runtime_status
+
+    if not get_running_pid():
+        return
+
+    data = read_runtime_status() or {}
+    platforms = data.get("platforms") or {}
+    connected = [name for name, info in platforms.items()
+                 if isinstance(info, dict) and info.get("state") == "connected"]
+    if not connected:
+        return
+
+    print()
+    print_error(
+        "Hermes gateway is running with active connections: "
+        + ", ".join(connected)
+    )
+    print_info(
+        "Migrating bot tokens while the gateway is active will cause "
+        "conflicts (Telegram, Discord, and Slack only allow one active "
+        "session per token)."
+    )
+    print_info("Recommendation: stop the gateway first with 'hermes stop'.")
+    print()
+    if not auto_yes and not prompt_yes_no("Continue anyway?", default=False):
+        print_info("Migration cancelled. Stop the gateway and try again.")
+        sys.exit(0)
+
+# State files commonly found in OpenClaw workspace directories — listed
+# during cleanup to help the user decide whether to archive
 _WORKSPACE_STATE_GLOBS = (
     "*/todo.json",
     "*/sessions/*",
@@ -98,7 +133,7 @@ def _find_openclaw_dirs() -> list[Path]:
 
 
 def _scan_workspace_state(source_dir: Path) -> list[tuple[Path, str]]:
-    """Scan an OpenClaw directory for workspace state files that cause confusion.
+    """Scan an OpenClaw directory for workspace state files.
 
     Returns a list of (path, description) tuples.
     """
@@ -181,7 +216,7 @@ def _cmd_migrate(args):
         source_dir = Path.home() / ".openclaw"
         if not source_dir.is_dir():
             # Try legacy directory names
-            for legacy in (".clawdbot", ".moldbot"):
+            for legacy in (".clawdbot", ".moltbot"):
                 candidate = Path.home() / legacy
                 if candidate.is_dir():
                     source_dir = candidate
@@ -251,6 +286,10 @@ def _cmd_migrate(args):
     if workspace_target:
         print_info(f"Workspace:   {workspace_target}")
     print()
+
+    # Check if a gateway is running with connected platforms — migrating tokens
+    # while the gateway is active will cause conflicts (e.g. Telegram 409).
+    _warn_if_gateway_running(auto_yes)
 
     # Ensure config.yaml exists before migration tries to read it
     config_path = get_config_path()
@@ -345,65 +384,16 @@ def _cmd_migrate(args):
     # Print results
     _print_migration_report(report, dry_run=False)
 
-    # After successful migration, offer to archive the source directory
-    if report.get("summary", {}).get("migrated", 0) > 0:
-        _offer_source_archival(source_dir, auto_yes)
-
-
-def _offer_source_archival(source_dir: Path, auto_yes: bool = False):
-    """After migration, offer to rename the source directory to prevent state fragmentation.
-
-    OpenClaw workspace directories contain state files (todo.json, sessions, etc.)
-    that the agent may discover and write to, causing confusion. Renaming the
-    directory prevents this.
-    """
-    if not source_dir.is_dir():
-        return
-
-    # Scan for state files that could cause problems
-    state_files = _scan_workspace_state(source_dir)
-
-    print()
-    print_header("Post-Migration Cleanup")
-    print_info("The OpenClaw directory still exists and contains workspace state files")
-    print_info("that can confuse the agent (todo lists, sessions, logs).")
-    if state_files:
-        print()
-        print(color("  Found state files:", Colors.YELLOW))
-        # Show up to 10 most relevant findings
-        for path, desc in state_files[:10]:
-            print(f"      {desc}")
-        if len(state_files) > 10:
-            print(f"      ... and {len(state_files) - 10} more")
-    print()
-    print_info(f"Recommend: rename {source_dir.name}/ to {source_dir.name}.pre-migration/")
-    print_info("This prevents the agent from discovering old workspace directories.")
-    print_info("You can always rename it back if needed.")
-    print()
-
-    if not auto_yes and not sys.stdin.isatty():
-        print_info("Non-interactive session — skipping archival.")
-        print_info("Run later with: hermes claw cleanup")
-        return
-
-    if auto_yes or prompt_yes_no(f"Archive {source_dir} now?", default=True):
-        try:
-            archive_path = _archive_directory(source_dir)
-            print_success(f"Archived: {source_dir} → {archive_path}")
-            print_info("The original directory has been renamed, not deleted.")
-            print_info(f"To undo: mv {archive_path} {source_dir}")
-        except OSError as e:
-            print_error(f"Could not archive: {e}")
-            print_info(f"You can do it manually: mv {source_dir} {source_dir}.pre-migration")
-    else:
-        print_info("Skipped. You can archive later with: hermes claw cleanup")
+    # Source directory is left untouched — archiving is not the migration
+    # tool's responsibility.  Users who want to clean up can run
+    # 'hermes claw cleanup' separately.
 
 
 def _cmd_cleanup(args):
     """Archive leftover OpenClaw directories after migration.
 
     Scans for OpenClaw directories that still exist after migration and offers
-    to rename them to .pre-migration to prevent state fragmentation.
+    to rename them to .pre-migration to free disk space.
     """
     dry_run = getattr(args, "dry_run", False)
     auto_yes = getattr(args, "yes", False)
@@ -478,7 +468,7 @@ def _cmd_cleanup(args):
 
         if state_files:
             print()
-            print(color(f"  {len(state_files)} state file(s) that could cause confusion:", Colors.YELLOW))
+            print(color(f"  {len(state_files)} state file(s) found:", Colors.YELLOW))
             for path, desc in state_files[:8]:
                 print(f"      {desc}")
             if len(state_files) > 8:
