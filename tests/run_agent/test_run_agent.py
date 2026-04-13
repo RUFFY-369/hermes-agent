@@ -1713,17 +1713,26 @@ class TestRunConversation:
             finish_reason="stop",
         )
         agent.client.chat.completions.create.side_effect = [empty_resp]
-        with (
-            patch.object(agent, "_persist_session"),
-            patch.object(agent, "_save_trajectory"),
-            patch.object(agent, "_cleanup_task_resources"),
-        ):
+        with patch.object(
+            agent.client.chat.completions,
+            "create",
+            side_effect=[
+                _mock_response("<think>internal reasoning</think>", "stop"),
+                _mock_response("<think>internal reasoning</think>", "stop"),
+                _mock_response("<think>internal reasoning</think>", "stop"),
+                _mock_response("<think>internal reasoning</think>", "stop"),
+            ],
+        ), \
+             patch.object(agent, "_persist_session"), \
+             patch.object(agent, "_save_trajectory"), \
+             patch.object(agent, "_cleanup_task_resources"):
             result = agent.run_conversation("answer me")
-        assert result["completed"] is True
-        assert result["final_response"] == "(empty)"
-        assert result["api_calls"] == 1  # no retries
-        # Reasoning should be preserved in the assistant message
-        assistant_msgs = [m for m in result["messages"] if m.get("role") == "assistant"]
+            # Reasoning-only messages now trigger up to 3 retries, then return (empty) sentinel
+            assert result["completed"] is True
+            assert result["final_response"] == "(empty)"
+            assert result["api_calls"] == 4  # 1 initial + 3 retries
+            # Reasoning should be preserved in the assistant message
+            assistant_msgs = [m for m in result["messages"] if m.get("role") == "assistant"]
         assert any(m.get("reasoning") for m in assistant_msgs)
 
     def test_reasoning_only_local_resumed_no_compression_triggered(self, agent):
@@ -3145,19 +3154,22 @@ def test_aiagent_uses_copilot_acp_client():
 
 def test_quiet_spinner_allowed_with_explicit_print_fn(agent):
     agent._print_fn = lambda *_a, **_kw: None
-    with patch.object(run_agent.sys.stdout, "isatty", return_value=False):
-        assert agent._should_start_quiet_spinner() is True
+    assert agent._should_start_quiet_spinner() is True
 
 
 def test_quiet_spinner_allowed_on_real_tty(agent):
     agent._print_fn = None
-    with patch.object(run_agent.sys.stdout, "isatty", return_value=True):
+    mock_stdout = MagicMock()
+    mock_stdout.isatty.return_value = True
+    with patch("run_agent.sys.stdout", mock_stdout):
         assert agent._should_start_quiet_spinner() is True
 
 
 def test_quiet_spinner_suppressed_on_non_tty_without_print_fn(agent):
     agent._print_fn = None
-    with patch.object(run_agent.sys.stdout, "isatty", return_value=False):
+    mock_stdout = MagicMock()
+    mock_stdout.isatty.return_value = False
+    with patch("run_agent.sys.stdout", mock_stdout):
         assert agent._should_start_quiet_spinner() is False
 
 

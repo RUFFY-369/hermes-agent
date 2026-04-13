@@ -26,7 +26,9 @@ async def test_restart_command_while_busy_requests_drain_without_interrupt():
     running_agent = MagicMock()
     runner._running_agents[session_key] = running_agent
 
-    result = await runner._handle_message(event)
+    from unittest.mock import patch
+    with patch("os.environ", {"INVOCATION_ID": ""}):
+        result = await runner._handle_message(event)
 
     assert result == "⏳ Draining 1 active agent(s) before restart..."
     running_agent.interrupt.assert_not_called()
@@ -122,11 +124,12 @@ async def test_request_restart_is_idempotent():
     runner, _adapter = make_restart_runner()
     runner.stop = AsyncMock()
 
-    assert runner.request_restart(detached=True, via_service=False) is True
-    first_task = next(iter(runner._background_tasks))
-    assert runner.request_restart(detached=True, via_service=False) is False
+    with patch("os.environ", {"INVOCATION_ID": ""}):
+        assert runner.request_restart(detached=True, via_service=False) is True
+        first_task = next(iter(runner._background_tasks))
+        assert runner.request_restart(detached=True, via_service=False) is False
 
-    await first_task
+        await first_task
 
     runner.stop.assert_awaited_once_with(
         restart=True, detached_restart=True, service_restart=False
