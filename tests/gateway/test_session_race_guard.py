@@ -60,7 +60,7 @@ def _make_runner():
 
 def _make_event(text="hello", chat_id="12345"):
     source = SessionSource(
-        platform=Platform.TELEGRAM, chat_id=chat_id, chat_type="dm"
+        platform=Platform.TELEGRAM, chat_id=chat_id, chat_type="dm", user_id="user_123"
     )
     return MessageEvent(text=text, message_type=MessageType.TEXT, source=source)
 

@@ -313,27 +313,30 @@ async def test_non_internal_event_without_user_triggers_pairing(monkeypatch, tmp
     monkeypatch.delenv("GATEWAY_ALLOW_ALL_USERS", raising=False)
     monkeypatch.delenv("GATEWAY_ALLOWED_USERS", raising=False)
 
-    runner = GatewayRunner(GatewayConfig())
-    adapter = SimpleNamespace(send=AsyncMock())
-    runner.adapters[Platform.DISCORD] = adapter
+    from unittest.mock import patch
+    with patch("gateway.pairing.PAIRING_DIR", tmp_path):
+        runner = GatewayRunner(GatewayConfig())
+        adapter = SimpleNamespace(send=AsyncMock())
+        runner.adapters[Platform.DISCORD] = adapter
 
-    source = SessionSource(
-        platform=Platform.DISCORD,
-        chat_id="123",
-        chat_type="dm",
-        user_id="unknown_user_999",
-    )
-    # Normal event (not internal)
-    event = MessageEvent(
-        text="hello",
-        source=source,
-        internal=False,
-    )
+        source = SessionSource(
+            platform=Platform.DISCORD,
+            chat_id="123",
+            chat_type="dm",
+            user_id="unknown_user_999",
+        )
+        # Normal event (not internal)
+        event = MessageEvent(
+            text="hello",
+            source=source,
+            internal=False,
+        )
 
-    result = await runner._handle_message(event)
+        result = await runner._handle_message(event)
 
-    # Should return None (unauthorized) and send pairing message
-    assert result is None
-    assert adapter.send.await_count == 1
+        # Should return None (unauthorized) and send pairing message
+        assert result is None
+        assert adapter.send.await_count == 1
+
     sent_text = adapter.send.await_args.args[1]
     assert "don't recognize you" in sent_text

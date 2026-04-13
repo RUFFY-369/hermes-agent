@@ -74,6 +74,10 @@ class TestRealSubagentInterrupt(unittest.TestCase):
         parent._session_db = None
         parent._delegate_depth = 0
         parent._delegate_spinner = None
+        parent._execution_thread_id = None
+        parent.request_overrides = {}
+        parent.interim_assistant_callback = None
+        parent.reasoning_config = None
         parent.tool_progress_callback = None
         parent.iteration_budget = IterationBudget(max_total=100)
         parent._client_kwargs = {"api_key": "test", "base_url": "http://localhost:1"}

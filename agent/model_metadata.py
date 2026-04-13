@@ -227,6 +227,7 @@ _URL_TO_PROVIDER: Dict[str, str] = {
     "api.x.ai": "xai",
     "api.xiaomimimo.com": "xiaomi",
     "xiaomimimo.com": "xiaomi",
+    "ai-gateway.vercel.sh": "ai-gateway",
 }
 
 

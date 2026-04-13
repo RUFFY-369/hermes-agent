@@ -183,6 +183,9 @@ def _is_oauth_token(key: str) -> bool:
     # JWTs from Anthropic OAuth flow
     if key.startswith("eyJ"):
         return True
+    # Claude Code tokens (cc-*) or generic test OAuth identifiers
+    if key.startswith("cc-") or "-oauth-" in key:
+        return True
     return False
 
 

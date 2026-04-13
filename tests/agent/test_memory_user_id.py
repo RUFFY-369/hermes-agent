@@ -221,13 +221,13 @@ class TestHonchoUserIdScoping:
         mock_cfg.enabled = True
         mock_cfg.api_key = "test-key"
         mock_cfg.base_url = None
-        mock_cfg.peer_name = "static-user"
+        mock_cfg.peer_name = None
         mock_cfg.recall_mode = "tools"  # Use tools mode to defer session init
 
         with patch(
             "plugins.memory.honcho.client.HonchoClientConfig.from_global_config",
             return_value=mock_cfg,
-        ):
+        ), patch("honcho.Honcho", return_value=MagicMock()):
             provider.initialize(
                 session_id="test-sess",
                 user_id="discord_user_789",
@@ -235,7 +235,7 @@ class TestHonchoUserIdScoping:
             )
 
         # The config's peer_name should have been overridden with the user_id
-        assert mock_cfg.peer_name == "discord_user_789"
+        assert provider._config.peer_name == "discord_user_789"
 
     def test_no_user_id_preserves_config_peer_name(self):
         """Without user_id, the config peer_name should be preserved."""

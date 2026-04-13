@@ -428,6 +428,11 @@ class AudioRecorder:
         """Current audio input RMS level (0-32767). Updated each audio chunk."""
         return self._current_rms
 
+    @property
+    def is_recording(self) -> bool:
+        """True if currently recording audio frames."""
+        return self._recording
+
     # -- public methods ------------------------------------------------------
 
     def _ensure_stream(self) -> None:

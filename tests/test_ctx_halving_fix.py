@@ -169,6 +169,10 @@ class TestEphemeralMaxOutputTokens:
         agent.reasoning_config = None
         agent._is_anthropic_oauth = False
         agent._ephemeral_max_output_tokens = None
+        agent._execution_thread_id = None
+        agent.request_overrides = {}
+        agent.interim_assistant_callback = None
+        agent.reasoning_config = None
 
         compressor = MagicMock()
         compressor.context_length = 200_000
@@ -239,6 +243,13 @@ class TestContextNotHalvedOnOutputCapError:
         agent.reasoning_config = None
         agent._is_anthropic_oauth = False
         agent._ephemeral_max_output_tokens = None
+        agent._execution_thread_id = None
+        agent.request_overrides = {}
+        agent.interim_assistant_callback = None
+        agent.reasoning_config = None
+        agent._execution_thread_id = None
+        agent.interim_assistant_callback = None
+        agent.request_overrides = {}
         agent.log_prefix = ""
         agent.quiet_mode = True
         agent.verbose_logging = False

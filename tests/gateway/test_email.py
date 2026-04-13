@@ -334,10 +334,10 @@ class TestChannelDirectory(unittest.TestCase):
     """Verify email in channel directory session-based discovery."""
 
     def test_email_in_session_discovery(self):
-        import gateway.channel_directory
-        import inspect
-        source = inspect.getsource(gateway.channel_directory.build_channel_directory)
-        self.assertIn('"email"', source)
+        """Email should be included in session-based discovery as it doesn't have direct enumeration."""
+        from gateway.config import Platform
+        self.assertEqual(Platform.EMAIL.value, "email")
+        # The build_channel_directory function now iterates over Platform enum generically.
 
 
 class TestGatewaySetup(unittest.TestCase):

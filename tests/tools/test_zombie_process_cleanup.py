@@ -190,24 +190,33 @@ class TestGatewayCleanupWiring:
     def test_gateway_stop_calls_close(self):
         """gateway stop() should call close() on all running agents."""
         import asyncio
-        from unittest.mock import MagicMock, patch
-
+        from unittest.mock import MagicMock, patch, AsyncMock
+    
         runner = MagicMock()
+        runner._restart_requested = False
+        runner._restart_detached = False
+        runner._restart_via_service = False
+        mock_agent_1 = MagicMock()
+        mock_agent_2 = MagicMock()
+        active_agents_dict = {"session-1": mock_agent_1, "session-2": mock_agent_2}
+        runner._drain_active_agents = AsyncMock(return_value=(active_agents_dict, False))
+        runner._running_agent_count = MagicMock(return_value=2)
+        
+        from gateway.run import GatewayRunner
+        runner._finalize_shutdown_agents = lambda active: GatewayRunner._finalize_shutdown_agents(runner, active)
+        
         runner._running = True
-        runner._running_agents = {}
+        runner._running_agents = {
+            "session-1": mock_agent_1,
+            "session-2": mock_agent_2,
+        }
         runner.adapters = {}
         runner._background_tasks = set()
         runner._pending_messages = {}
         runner._pending_approvals = {}
         runner._shutdown_event = asyncio.Event()
         runner._exit_reason = None
-
-        mock_agent_1 = MagicMock()
-        mock_agent_2 = MagicMock()
-        runner._running_agents = {
-            "session-1": mock_agent_1,
-            "session-2": mock_agent_2,
-        }
+        runner._stop_task = None
 
         from gateway.run import GatewayRunner
 

@@ -35,6 +35,7 @@ def make_restart_source(chat_id: str = "123456", chat_type: str = "dm") -> Sessi
         platform=Platform.TELEGRAM,
         chat_id=chat_id,
         chat_type=chat_type,
+        user_id="user_123",
     )
 
 
@@ -71,9 +72,8 @@ def make_restart_runner(
     runner._queue_or_replace_pending_event = GatewayRunner._queue_or_replace_pending_event.__get__(
         runner, GatewayRunner
     )
-    runner._session_key_for_source = GatewayRunner._session_key_for_source.__get__(
-        runner, GatewayRunner
-    )
+    from gateway.session import build_session_key
+    runner._session_key_for_source = lambda source: build_session_key(source)
     runner._handle_active_session_busy_message = (
         GatewayRunner._handle_active_session_busy_message.__get__(runner, GatewayRunner)
     )

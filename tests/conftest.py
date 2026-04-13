@@ -26,6 +26,12 @@ def _isolate_hermes_home(tmp_path, monkeypatch):
     (fake_home / "memories").mkdir()
     (fake_home / "skills").mkdir()
     monkeypatch.setenv("HERMES_HOME", str(fake_home))
+    
+    # Redirect CODEX_HOME to prevent leaking real tokens from ~/.codex/auth.json
+    fake_codex = tmp_path / "codex_test"
+    fake_codex.mkdir()
+    monkeypatch.setenv("CODEX_HOME", str(fake_codex))
+
     # Reset plugin singleton so tests don't leak plugins from ~/.hermes/plugins/
     try:
         import hermes_cli.plugins as _plugins_mod
@@ -38,8 +44,18 @@ def _isolate_hermes_home(tmp_path, monkeypatch):
     monkeypatch.delenv("HERMES_SESSION_CHAT_ID", raising=False)
     monkeypatch.delenv("HERMES_SESSION_CHAT_NAME", raising=False)
     monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
-    # Avoid making real calls during tests if this key is set in the env files
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    # Avoid making real calls during tests if these keys are set in the env/shell.
+    # We scrub them here to ensure the agent starts with a truly clean slate.
+    for env_var in [
+        "OPENAI_API_KEY", "OPENAI_BASE_URL",
+        "ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN",
+        "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL",
+        "CODEX_TOKEN", "CODEX_API_KEY",
+        "NOUS_INFERENCE_BASE_URL", "NOUS_API_KEY",
+        "AI_GATEWAY_API_KEY", "AI_GATEWAY_BASE_URL",
+        "CLAUDE_CODE_TOKEN", "HERMES_OAUTH_TOKEN",
+    ]:
+        monkeypatch.delenv(env_var, raising=False)
 
 
 @pytest.fixture()

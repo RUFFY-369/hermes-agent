@@ -120,6 +120,7 @@ def test_set_session_env_handles_missing_optional_fields():
         chat_name=None,
         chat_type="private",
         thread_id=None,
+        user_id="user_123",
     )
     context = SessionContext(source=source, connected_platforms=[], home_channels={})
 
@@ -178,6 +179,7 @@ def test_set_session_env_includes_session_key():
         chat_name="Group",
         chat_type="group",
         thread_id="17585",
+        user_id="user_123",
     )
     context = SessionContext(
         source=source,

@@ -24,6 +24,12 @@ def _make_compressor():
     compressor.last_prompt_tokens = 0
     compressor._previous_summary = None
     compressor._summary_failure_cooldown_until = 0.0
+    # Add missing attributes needed by _generate_summary
+    compressor.model = "test-model"
+    compressor.provider = "test-provider"
+    compressor.base_url = "https://api.example.com"
+    compressor.api_key = "test-key"
+    compressor.api_mode = "chat_completions"
     compressor.summary_model = None
     return compressor
 

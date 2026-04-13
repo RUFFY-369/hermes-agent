@@ -44,6 +44,7 @@ class TestCLISubagentInterrupt(unittest.TestCase):
         parent._interrupt_message = None
         parent._active_children = []
         parent._active_children_lock = threading.Lock()
+        parent._execution_thread_id = None
         parent.quiet_mode = True
         parent.model = "test/model"
         parent.base_url = "http://localhost:1"
@@ -63,6 +64,14 @@ class TestCLISubagentInterrupt(unittest.TestCase):
         parent._delegate_depth = 0
         parent._delegate_spinner = None
         parent.tool_progress_callback = None
+        parent.tool_start_callback = None
+        parent.tool_complete_callback = None
+        parent.interim_assistant_callback = None
+        parent.request_overrides = {}
+        parent._checkpoint_max_snapshots = 50
+        parent._checkpoints_enabled = False
+        parent._is_anthropic_oauth = False
+        parent._ephemeral_max_output_tokens = None
 
         # We'll track what happens with _active_children
         original_children = parent._active_children

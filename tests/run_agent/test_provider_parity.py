@@ -57,6 +57,7 @@ def _make_agent(monkeypatch, provider, api_mode="chat_completions", base_url="ht
         quiet_mode=True,
         skip_context_files=True,
         skip_memory=True,
+        request_overrides={"model_context_length": 128000},
     )
 
 
