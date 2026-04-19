@@ -24,16 +24,12 @@ This skill is a gateway to the **scientific-agent-skills** library. Instead of b
 ## How to fetch and use a skill
 
 1. Identify the domain and skill name from the index below.
-2. Clone the repo (shallow clone to save time):
-   ```bash
-   git clone --depth 1 https://github.com/K-Dense-AI/scientific-agent-skills.git /tmp/science-library
-   ```
+2. Clone the repository to a temporary directory (e.g., `/tmp/science-library`).
+   *   URL: `https://github.com/K-Dense-AI/scientific-agent-skills.git`
+   *   Command Pattern: `git clone --depth 1 <URL> <TARGET_DIR>`
 3. Read the specific skill:
-   ```bash
-   # Each skill is at: scientific-skills/<domain-name>/SKILL.md
-   cat /tmp/science-library/scientific-skills/rdkit/SKILL.md
-   ```
-4. Follow the fetched skill as reference material. Treat them as expert domain guides with correct parameters and validated workflows.
+   *   Path: `scientific-skills/<domain-name>/SKILL.md`
+4. Use the fetched file as expert reference material for valid workflows and parameters.
 
 ## Skill Index (17 Official Domains)
 
@@ -120,8 +116,14 @@ scientific-agent-skills:
 
 ## Environment Setup
 
-These skills assume a scientific research workstation. Common dependencies:
-`uv pip install numpy pandas scipy matplotlib seaborn scikit-learn biopython pysam rdkit scanpy anndata astropy qiskit pennylane`
+These skills assume a scientific research workstation with Python 3.10+ installed.
+
+### Required Packages
+*   **Core**: `numpy`, `pandas`, `scipy`, `matplotlib`, `seaborn`, `scikit-learn`
+*   **Domain Specific**: `biopython`, `pysam`, `rdkit`, `scanpy`, `anndata`, `astropy`, `qiskit`, `pennylane`
+
+Example installation:
+`pip install numpy pandas biopython rdkit scanpy`
 
 ## Pitfalls
 - Skills are expert reference material, not Hermes-native bundles.
