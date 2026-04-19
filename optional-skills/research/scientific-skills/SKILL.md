@@ -1,11 +1,11 @@
 ---
 name: scientific-skills
-description: Gateway to 134+ specialized scientific skills from scientific-agent-skills. Covers genomics, cheminformatics, quantum computing, research writing, medical analysis, and more. Fetches domain-specific reference material on demand.
-version: 1.0.0
+description: Gateway to 134+ specialized scientific skills from scientific-agent-skills. Covers 17 high-level domains including Bioinformatics, Cheminformatics, Medical Imaging, Physics, Laboratory Automation, and more. Fetches expert reference material on demand.
+version: 1.1.0
 platforms: [linux, macos]
 metadata:
   hermes:
-    tags: [science, biology, chemistry, physics, engineering, research, bioinformatics, cheminformatics, medical, data-science, analytics]
+    tags: [science, biology, chemistry, physics, engineering, research, bioinformatics, cheminformatics, medical, data-science, analytics, lab-automation]
     category: research
 ---
 
@@ -13,7 +13,7 @@ metadata:
 
 Use when asked about molecular analysis, drug discovery, genomic/transcriptomic data processing, physics simulations, astronomical calculations, professional scientific writing, grant preparation, clinical reports, or any high-level scientific research task.
 
-This skill is a gateway to the **scientific-agent-skills** library. Instead of bundling 134+ domain-specific skills, it indexes them and fetches what you need on demand.
+This skill is a gateway to the **scientific-agent-skills** library. Instead of bundling 134+ domain-specific skills, it indexes them across 17 specialized domains and fetches what you need on demand.
 
 ## Sources
 
@@ -33,68 +33,97 @@ This skill is a gateway to the **scientific-agent-skills** library. Instead of b
    # Each skill is at: scientific-skills/<domain-name>/SKILL.md
    cat /tmp/science-library/scientific-skills/rdkit/SKILL.md
    ```
-4. Follow the fetched skill as reference material. These are NOT Hermes-format skills — treat them as expert domain guides. They contain correct parameters, proper tool flags, and validated workflows.
+4. Follow the fetched skill as reference material. Treat them as expert domain guides with correct parameters and validated workflows.
 
-## Skill Index by Domain
+## Skill Index (17 Official Domains)
 
-### Computational Biology & Genomics
+### Bioinformatics & Genomics
 scientific-agent-skills:
-  anndata/ arboreto/ biopython/ bioservices/ cellxgene-census/ cobrapy/ deepchem/ deeptools/
-  depmap/ dnanexus-integration/ esm/ etetoolkit/ flowio/ gget/ ginkgo-cloud-lab/ glycoengineering/
-  gtars/ histolab/ imaging-data-commons/ labarchive-integration/ lamindb/ latchbio-integration/ omero-integration/ opentrons-integration/
-  pathml/ phylogenetics/ polars-bio/ primekg/ protocolsio-integration/ pydeseq2/ pydicom/ pyhealth/
-  pylabrobot/ pyopenms/ pysam/ pytdc/ scanpy/ scikit-bio/ scvelo/ scvi-tools/
-  tiledbvcf/
+  anndata/ arboreto/ biopython/ bioservices/ cellxgene-census/ deeptools/ etetoolkit/ gget/
+  gtars/ latchbio-integration/ phylogenetics/ polars-bio/ pydeseq2/ pysam/ scanpy/ scikit-bio/
+  scvelo/ tiledbvcf/
 
 ### Cheminformatics & Drug Discovery
 scientific-agent-skills:
-  adaptyv/ datamol/ diffdock/ medchem/ molecular-dynamics/ molfeat/ rdkit/ rowan/
-  torchdrug/
+  adaptyv/ datamol/ diffdock/ medchem/ molfeat/ rdkit/ rowan/ torchdrug/
 
-### Physics & Quantum Computing
+### Proteomics & Mass Spectrometry
 scientific-agent-skills:
-  astropy/ cirq/ geomaster/ pennylane/ pymatgen/ qiskit/ qutip/
+  pyopenms/
 
-### Data Science & Machine Learning
+### Clinical Research & Precision Medicine
 scientific-agent-skills:
-  aeon/ dask/ deepchem/ geniml/ geopandas/ optimize-for-gpu/ polars/ pytorch-lightning/
-  scikit-learn/ scikit-survival/ seaborn/ shap/ stable-baselines3/ statistical-analysis/ statsmodels/ timesfm-forecasting/
-  torch-geometric/ transformers/ umap-learn/ vaex/ zarr-python/
+  clinical-decision-support/ clinical-reports/ pharmacogenomics/ treatment-plans/
 
-### Research Management & Writing
+### Healthcare AI & Clinical ML
 scientific-agent-skills:
-  citation-management/ consciousness-council/ docx/ exploratory-data-analysis/ hypogenic/ hypothesis-generation/ infographics/ iso-13485-certification/
-  latex-posters/ literature-review/ markdown-mermaid-writing/ market-research-reports/ markitdown/ paper-lookup/ paperzilla/ parallel-web/
-  pdf/ peer-review/ pptx-posters/ pptx/ research-grants/ research-lookup/ scholar-evaluation/ scientific-brainstorming/
-  scientific-critical-thinking/ scientific-schematics/ scientific-slides/ scientific-visualization/ scientific-writing/ venue-templates/ what-if-oracle/ xlsx/
-  zotero/
+  pyhealth/ neurokit2/
 
-### Medical & Clinical Research
+### Medical Imaging & Digital Pathology
 scientific-agent-skills:
-  clinical-decision-support/ clinical-reports/ neurokit2/ neuropixels-analysis/ treatment-plans/
+  pydicom/ pathml/ histolab/ imaging-data-commons/ omero-integration/
+
+### Machine Learning & AI
+scientific-agent-skills:
+  aeon/ geniml/ optimize-for-gpu/ pytorch-lightning/ scikit-learn/ scikit-survival/ shap/ stable-baselines3/
+  transformers/ umap-learn/
+
+### Materials Science & Chemistry
+scientific-agent-skills:
+  cobrapy/ molecular-dynamics/ pymatgen/
+
+### Physics & Astronomy
+scientific-agent-skills:
+  astropy/ cirq/ pennylane/ qiskit/ qutip/ sympy/
+
+### Engineering & Simulation
+scientific-agent-skills:
+  fluidsim/ simpy/ pymoo/
+
+### Data Analysis & Visualization
+scientific-agent-skills:
+  dask/ exploratory-data-analysis/ matplotlib/ polars/ seaborn/ statistical-analysis/ statsmodels/ vaex/
+  zarr-python/
+
+### Geospatial Science & Remote Sensing
+scientific-agent-skills:
+  geomaster/ geopandas/
+
+### Laboratory Automation
+scientific-agent-skills:
+  ginkgo-cloud-lab/ opentrons-integration/ pylabrobot/ protocolsio-integration/
+
+### Scientific Communication
+scientific-agent-skills:
+  citation-management/ docx/ infographics/ latex-posters/ literature-review/ markdown-mermaid-writing/ market-research-reports/ markitdown/
+  paper-lookup/ paperzilla/ parallel-web/ pdf/ peer-review/ pptx-posters/ pptx/ research-grants/
+  scientific-schematics/ scientific-slides/ scientific-visualization/ scientific-writing/ venue-templates/ xlsx/ zotero/
+
+### Multi-omics & Systems Biology
+scientific-agent-skills:
+  lamindb/ primekg/
+
+### Protein Engineering & Design
+scientific-agent-skills:
+  esm/
+
+### Research Methodology
+scientific-agent-skills:
+  consciousness-council/ hypogenic/ hypothesis-generation/ research-lookup/ scholar-evaluation/ scientific-brainstorming/ scientific-critical-thinking/ what-if-oracle/
+
+### Specialized & Advanced Research Domains
+scientific-agent-skills:
+  generate-image/ pymc/ networkx/ depmap/ labarchive-integration/ flowio/ open-notebook/ pyzotero/
+  neuropixels-analysis/ glycoengineering/ bgpt-paper-search/ matlab/ dnanexus-integration/ dhdna-profiler/ iso-13485-certification/ database-lookup/
+  pytdc/ timesfm-forecasting/ usfiscaldata/ pufferlib/ deepchem/ benchling-integration/ torch-geometric/ matchms/
+  scvi-tools/ get-available-resources/ modal/
 
 ## Environment Setup
 
 These skills assume a scientific research workstation. Common dependencies:
-
-```bash
-# Core Scientific Python
-pip install numpy pandas scipy matplotlib seaborn scikit-learn
-
-# Domain Specific
-pip install biopython pysam rdkit scanpy anndata astropy qiskit pennylane
-
-# System requirements (Ubuntu/Debian)
-sudo apt install git build-essential python3-dev
-
-# This library highly recommends 'uv' for dependency management
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
+`uv pip install numpy pandas scipy matplotlib seaborn scikit-learn biopython pysam rdkit scanpy anndata astropy qiskit pennylane`
 
 ## Pitfalls
-
-- The fetched skills are NOT in Hermes SKILL.md format. They use their own structure designed for the Agent Skills standard. Read them as expert reference material.
-- Some skills require API keys (e.g., Benchling, Ginkgo, Zotero). Ensure environment variables are set before execution.
-- This library uses `uv` for high-speed dependency isolation. If a skill has a `scripts/` or `examples/` folder with Python files, check for a `pyproject.toml` or `requirements.txt`.
-- Computational biology tasks often involve large datasets. Be mindful of disk space in `/tmp/` and the local environment.
-- Always check the `SECURITY.md` or scan results in the library for any safety considerations before running untrusted research scripts.
+- Skills are expert reference material, not Hermes-native bundles.
+- API keys may be required for cloud-based tools (Benchling, Ginkgo, etc.).
+- `uv` is recommended for high-performance dependency isolation.
