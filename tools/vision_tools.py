@@ -445,6 +445,7 @@ async def vision_analyze_tool(
             "user_prompt": user_prompt[:200] + "..." if len(user_prompt) > 200 else user_prompt,
             "model": model
         },
+        "images_processed": 0,
         "error": None,
         "success": False,
         "analysis_length": 0,
@@ -452,100 +453,74 @@ async def vision_analyze_tool(
         "image_size_bytes": 0
     }
     
-    temp_image_path = None
-    # Track whether we should clean up the file after processing.
-    # Local files (e.g. from the image cache) should NOT be deleted.
-    should_cleanup = True
-    detected_mime_type = None
-    
-    try:
-        from tools.interrupt import is_interrupted
-        if is_interrupted():
-            return tool_error("Interrupted", success=False)
-
-        logger.info("Analyzing image: %s", image_url[:60])
-        logger.info("User prompt: %s", user_prompt[:100])
-        
-        # Determine if this is a local file path or a remote URL
-        # Strip file:// scheme so file URIs resolve as local paths.
-        resolved_url = image_url
-        if resolved_url.startswith("file://"):
-            resolved_url = resolved_url[len("file://"):]
-        local_path = Path(os.path.expanduser(resolved_url))
-        if local_path.is_file():
-            # Local file path (e.g. from platform image cache) -- skip download
-            logger.info("Using local image file: %s", image_url)
-            temp_image_path = local_path
-            should_cleanup = False  # Don't delete cached/local files
-        elif _validate_image_url(image_url):
-            # Remote URL -- download to a temporary location
-            blocked = check_website_access(image_url)
-            if blocked:
-                raise PermissionError(blocked["message"])
-            logger.info("Downloading image from URL...")
-            temp_dir = Path("./temp_vision_images")
-            temp_image_path = temp_dir / f"temp_image_{uuid.uuid4()}.jpg"
-            await _download_image(image_url, temp_image_path)
-            should_cleanup = True
+        # Handle multiple image URLs/paths
+        urls_to_process = []
+        if isinstance(image_url, list):
+            urls_to_process = image_url
+        elif "," in image_url:
+            urls_to_process = [u.strip() for u in image_url.split(",")]
         else:
-            raise ValueError(
-                "Invalid image source. Provide an HTTP/HTTPS URL or a valid local file path."
-            )
-        
-        # Get image file size for logging
-        image_size_bytes = temp_image_path.stat().st_size
-        image_size_kb = image_size_bytes / 1024
-        logger.info("Image ready (%.1f KB)", image_size_kb)
+            urls_to_process = [image_url]
 
-        detected_mime_type = _detect_image_mime_type(temp_image_path)
-        if not detected_mime_type:
-            raise ValueError("Only real image files are supported for vision analysis.")
-        
-        # Convert image to base64 — send at full resolution first.
-        # If the provider rejects it as too large, we auto-resize and retry.
-        logger.info("Converting image to base64...")
-        image_data_url = _image_to_base64_data_url(temp_image_path, mime_type=detected_mime_type)
-        data_size_kb = len(image_data_url) / 1024
-        logger.info("Image converted to base64 (%.1f KB)", data_size_kb)
+        image_data_urls = []
+        paths_to_cleanup = []
 
-        # Hard limit (20 MB) — no provider accepts payloads this large.
-        if len(image_data_url) > _MAX_BASE64_BYTES:
-            # Try to resize down to 5 MB before giving up.
-            image_data_url = _resize_image_for_vision(
-                temp_image_path, mime_type=detected_mime_type)
+        for url in urls_to_process:
+            if not url: continue
+            
+            # Determine if this is a local file path or a remote URL
+            resolved_url = url
+            if resolved_url.startswith("file://"):
+                resolved_url = resolved_url[len("file://"):]
+            
+            local_path = Path(os.path.expanduser(resolved_url))
+            img_path = None
+            is_temp = False
+
+            if local_path.is_file():
+                logger.info("Using local image file: %s", url)
+                img_path = local_path
+                is_temp = False
+            elif _validate_image_url(url):
+                logger.info("Downloading image from URL...")
+                temp_dir = Path("./temp_vision_images")
+                temp_dir.mkdir(exist_ok=True)
+                img_path = temp_dir / f"temp_image_{uuid.uuid4()}.jpg"
+                await _download_image(url, img_path)
+                is_temp = True
+            else:
+                logger.warning("Skipping invalid image source: %s", url)
+                continue
+
+            detected_mime_type = _detect_image_mime_type(img_path)
+            if not detected_mime_type:
+                if is_temp: img_path.unlink()
+                continue
+
+            image_data_url = _image_to_base64_data_url(img_path, mime_type=detected_mime_type)
+            
+            # Auto-resize if too large
             if len(image_data_url) > _MAX_BASE64_BYTES:
-                raise ValueError(
-                    f"Image too large for vision API: base64 payload is "
-                    f"{len(image_data_url) / (1024 * 1024):.1f} MB "
-                    f"(limit {_MAX_BASE64_BYTES / (1024 * 1024):.0f} MB) "
-                    f"even after resizing. "
-                    f"Install Pillow (`pip install Pillow`) for better auto-resize, "
-                    f"or compress the image manually."
-                )
+                image_data_url = _resize_image_for_vision(img_path, mime_type=detected_mime_type)
+            
+            image_data_urls.append(image_data_url)
+            if is_temp:
+                paths_to_cleanup.append(img_path)
 
-        debug_call_data["image_size_bytes"] = image_size_bytes
+        if not image_data_urls:
+            raise ValueError("No valid images found for analysis.")
+
+        debug_call_data["images_processed"] = len(image_data_urls)
         
-        # Use the prompt as provided (model_tools.py now handles full description formatting)
-        comprehensive_prompt = user_prompt
-        
-        # Prepare the message with base64-encoded image
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": comprehensive_prompt
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": image_data_url
-                        }
-                    }
-                ]
-            }
-        ]
+        # Prepare the message with multiple base64-encoded images
+        content_blocks = [{"type": "text", "text": user_prompt}]
+        for data_url in image_data_urls:
+            content_blocks.append({
+                "type": "image_url",
+                "image_url": {"url": data_url}
+            })
+
+        messages = [{"role": "user", "content": content_blocks}]
         
         logger.info("Processing image with vision model...")
         
@@ -575,24 +550,13 @@ async def vision_analyze_tool(
         }
         if model:
             call_kwargs["model"] = model
-        # Try full-size image first; on size-related rejection, downscale and retry.
+        # Call the vision API via centralized router.
         try:
             response = await async_call_llm(**call_kwargs)
         except Exception as _api_err:
-            if (_is_image_size_error(_api_err)
-                    and len(image_data_url) > _RESIZE_TARGET_BYTES):
-                logger.info(
-                    "API rejected image (%.1f MB, likely too large); "
-                    "auto-resizing to ~%.0f MB and retrying...",
-                    len(image_data_url) / (1024 * 1024),
-                    _RESIZE_TARGET_BYTES / (1024 * 1024),
-                )
-                image_data_url = _resize_image_for_vision(
-                    temp_image_path, mime_type=detected_mime_type)
-                messages[0]["content"][1]["image_url"]["url"] = image_data_url
-                response = await async_call_llm(**call_kwargs)
-            else:
-                raise
+            # Multi-image retry logic is complex; if it fails, we raise for now.
+            # In the future, we could selectively downscale all images.
+            raise
         
         # Extract the analysis — fall back to reasoning if content is empty
         analysis = extract_content_or_reasoning(response)
@@ -672,15 +636,14 @@ async def vision_analyze_tool(
         return json.dumps(result, indent=2, ensure_ascii=False)
     
     finally:
-        # Clean up temporary image file (but NOT local/cached files)
-        if should_cleanup and temp_image_path and temp_image_path.exists():
-            try:
-                temp_image_path.unlink()
-                logger.debug("Cleaned up temporary image file")
-            except Exception as cleanup_error:
-                logger.warning(
-                    "Could not delete temporary file: %s", cleanup_error, exc_info=True
-                )
+        # Clean up temporary image files
+        for p in paths_to_cleanup:
+            if p.exists():
+                try:
+                    p.unlink()
+                    logger.debug("Cleaned up temporary image file: %s", p)
+                except Exception as cleanup_error:
+                    logger.warning("Could not delete temporary file %s: %s", p, cleanup_error)
 
 
 def check_vision_requirements() -> bool:
@@ -768,7 +731,7 @@ VISION_ANALYZE_SCHEMA = {
         "properties": {
             "image_url": {
                 "type": "string",
-                "description": "Image URL (http/https) or local file path to analyze."
+                "description": "Image URL (http/https), local file path, or comma-separated list of paths to analyze."
             },
             "question": {
                 "type": "string",
