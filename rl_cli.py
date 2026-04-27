@@ -55,6 +55,15 @@ else:
 from run_agent import AIAgent
 from tools.rl_training_tool import get_missing_keys
 
+# Evolution Imports
+from evolution.orchestrator import GASPOrchestrator
+from evolution.client import SGLangClient
+from evolution.sandbox import DockerSandbox
+from evolution.grpo_trainer import GRPOTrainer
+from evolution.opd_trainer import OPDTrainer
+from evolution.judge import PRMJudge
+from evolution.tinker import TinkerBridgeTrainer
+
 
 # ============================================================================
 # Config Loading
@@ -243,6 +252,8 @@ def main(
     check_server: bool = False,
     verbose: bool = False,
     save_trajectories: bool = True,
+    evolution: bool = False,
+    evolution_iterations: int = 3,
 ):
     """
     RL Training CLI - Dedicated runner for RL training workflows.
@@ -281,6 +292,46 @@ def main(
     if base_url is None:
         base_url = config["base_url"]
     
+    # Handle Evolution Mode
+    if evolution:
+        print("\n🚀 Starting Autonomous Evolution (GASP Loop)...")
+        print("=" * 60)
+        
+        async def run_evolution():
+            client = SGLangClient()
+            sandbox = DockerSandbox()
+            grpo = GRPOTrainer(model_name="meta-llama/Llama-3.1-8B-Instruct")
+            opd = OPDTrainer()
+            prm = PRMJudge(client)
+            tinker = TinkerBridgeTrainer(use_tinker=True)
+            
+            try:
+                orchestrator = GASPOrchestrator(
+                    client, sandbox, grpo, opd, prm, 
+                    tinker_bridge=tinker,
+                    group_size=16
+                )
+                
+                active_lora = None
+                for i in range(evolution_iterations):
+                    print(f"\n⚡ Iteration {i+1}/{evolution_iterations}")
+                    rewards, rollouts, prompts, task = await orchestrator.run_iteration(lora_path=active_lora)
+                    
+                    if tinker and tinker.is_active():
+                        adapter_path = await tinker.train_step(rewards, rollouts, task)
+                    else:
+                        adapter_path = f"output/adapter_v{i+1}"
+                        await grpo.update(rewards, rollouts=rollouts, prompts=prompts, save_path=adapter_path)
+                    
+                    if adapter_path:
+                        await opd.sync(adapter_path=adapter_path)
+                        active_lora = adapter_path
+            finally:
+                await client.close()
+
+        asyncio.run(run_evolution())
+        return
+
     print("🎯 RL Training Agent")
     print("=" * 60)
     
