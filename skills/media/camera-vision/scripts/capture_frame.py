@@ -92,7 +92,7 @@ def capture_with_ffmpeg(device_path, output_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Capture a frame or burst from the camera.")
-    parser.add_argument("--device", default="/dev/video0", help="Camera device path (default: /dev/video0)")
+    parser.add_argument("--device", default="/dev/video1", help="Camera device path (default: /dev/video1)")
     parser.add_argument("--output", help="Output file path pattern (default: temp_vision_images/camera_capture.jpg)")
     parser.add_argument("--burst", type=int, default=1, help="Number of frames to capture (default: 1)")
     parser.add_argument("--interval", type=float, default=0.5, help="Interval between frames in seconds (default: 0.5)")
@@ -105,8 +105,8 @@ def main():
 
     # If default device is requested, try to find a working one
     devices_to_try = [device_path]
-    if device_path == "/dev/video0":
-        devices_to_try.extend(["/dev/video1", "/dev/video2"])
+    if device_path == "/dev/video1":
+        devices_to_try.extend(["/dev/video0", "/dev/video2"])
 
     working_device = None
     for dev in devices_to_try:
