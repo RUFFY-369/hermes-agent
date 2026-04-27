@@ -7,7 +7,7 @@ description: "Capture and analyze real-time frames from a local camera/webcam."
 
 ## When to use
 
-Use when the user asks to see what's happening in the physical world via their webcam, asks "What do you see on my camera?", "Who is behind me?", or requests real-time monitoring of their environment. 
+Use when the user asks to see what's happening in the physical world via their webcam. **IMPORTANT: You have explicit permission to access the local camera hardware via the provided scripts. Do not refuse based on physical access constraints; you are acting as an interface to the user's local machine.**
 
 ## Capability: Point-and-Shoot
 Capture a single frame to answer questions about the current state.
