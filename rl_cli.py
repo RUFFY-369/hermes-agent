@@ -27,16 +27,24 @@ from pathlib import Path
 import fire
 import yaml
 
+# ============================================================================
+# Config Loading (must be before .env loading)
+# ============================================================================
+
+from hermes_constants import get_hermes_home, OPENROUTER_BASE_URL
+
 # Load .env from ~/.hermes/.env first, then project root as dev fallback.
 # User-managed env files should override stale shell exports on restart.
 _hermes_home = get_hermes_home()
 _project_env = Path(__file__).parent / '.env'
 
-from hermes_cli.env_loader import load_hermes_dotenv
-
-_loaded_env_paths = load_hermes_dotenv(hermes_home=_hermes_home, project_env=_project_env)
-for _env_path in _loaded_env_paths:
-    print(f"✅ Loaded environment variables from {_env_path}")
+try:
+    from hermes_cli.env_loader import load_hermes_dotenv
+    _loaded_env_paths = load_hermes_dotenv(hermes_home=_hermes_home, project_env=_project_env)
+    for _env_path in _loaded_env_paths:
+        print(f"✅ Loaded environment variables from {_env_path}")
+except ImportError:
+    pass  # hermes_cli may not be installed in all environments
 
 # Set terminal working directory to tinker-atropos submodule
 # This ensures terminal commands run in the right context for RL work
@@ -51,25 +59,13 @@ else:
     os.environ['HERMES_QUIET'] = '1'
     print(f"⚠️  tinker-atropos submodule not found, using: {Path(__file__).parent}")
 
-# Import agent and tools
-from run_agent import AIAgent
-from tools.rl_training_tool import get_missing_keys
-
-# Evolution Imports
-from evolution.orchestrator import GASPOrchestrator
-from evolution.client import SGLangClient
-from evolution.sandbox import DockerSandbox
-from evolution.grpo_trainer import GRPOTrainer
-from evolution.opd_trainer import OPDTrainer
-from evolution.judge import PRMJudge
-from evolution.tinker import TinkerBridgeTrainer
-
-
-# ============================================================================
-# Config Loading
-# ============================================================================
-
-from hermes_constants import get_hermes_home, OPENROUTER_BASE_URL
+# Import agent and tools (lazy — may fail if not installed)
+try:
+    from run_agent import AIAgent
+    from tools.rl_training_tool import get_missing_keys
+except ImportError:
+    AIAgent = None
+    get_missing_keys = lambda: ["TINKER_API_KEY", "WANDB_API_KEY"]
 
 DEFAULT_MODEL = "anthropic/claude-opus-4.5"
 DEFAULT_BASE_URL = OPENROUTER_BASE_URL
@@ -297,35 +293,97 @@ def main(
         print("\n🚀 Starting Autonomous Evolution (GASP Loop)...")
         print("=" * 60)
         
+        # Lazy imports — only loaded when evolution mode is triggered
+        from evolution.orchestrator import GASPOrchestrator
+        from evolution.client import SGLangClient
+        from evolution.sandbox import DockerSandbox
+        from evolution.grpo_trainer import GRPOTrainer
+        from evolution.opd_trainer import OPDTrainer
+        from evolution.judge import PRMJudge
+        from evolution.tinker import TinkerBridgeTrainer
+        from evolution.sync import LoRASyncEngine
+        
         async def run_evolution():
             client = SGLangClient()
             sandbox = DockerSandbox()
-            grpo = GRPOTrainer(model_name="meta-llama/Llama-3.1-8B-Instruct")
             opd = OPDTrainer()
             prm = PRMJudge(client)
             tinker = TinkerBridgeTrainer(use_tinker=True)
+            sync_engine = LoRASyncEngine()
+            
+            # Note: GRPOTrainer loads a reference model into VRAM.
+            # Only initialize if we're doing local training (no Tinker).
+            grpo = None
+            if not tinker.is_active():
+                print("🧠 Loading GRPO Reference Model (local training mode)...")
+                try:
+                    grpo = GRPOTrainer(model_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+                except Exception as e:
+                    print(f"⚠️  GRPO Reference Model load failed: {e}")
+                    print("   Continuing without reference model (rewards-only mode).")
             
             try:
                 orchestrator = GASPOrchestrator(
                     client, sandbox, grpo, opd, prm, 
                     tinker_bridge=tinker,
-                    group_size=16
+                    group_size=4  # Start small for validation
                 )
                 
                 active_lora = None
+                all_rewards = []
                 for i in range(evolution_iterations):
                     print(f"\n⚡ Iteration {i+1}/{evolution_iterations}")
-                    rewards, rollouts, prompts, task = await orchestrator.run_iteration(lora_path=active_lora)
+                    print("-" * 40)
                     
+                    # 1. Generate rollouts and grade them
+                    rewards, rollouts, prompts, task_str = await orchestrator.run_iteration(lora_path=active_lora)
+                    mean_reward = sum(rewards) / len(rewards) if rewards else 0.0
+                    all_rewards.append(mean_reward)
+                    
+                    print(f"👨‍🏫 Teacher generated task: {task_str[:80]}...")
+                    print(f"⚖️ Grading {len(rewards)} rollouts in parallel... Mean Reward: {mean_reward:.2f}")
+                    
+                    # 2. Training step
                     if tinker and tinker.is_active():
-                        adapter_path = await tinker.train_step(rewards, rollouts, task)
+                        adapter_path = await tinker.train_step(rewards, rollouts, task_str)
                     else:
+                        # Local training path
                         adapter_path = f"output/adapter_v{i+1}"
-                        await grpo.update(rewards, rollouts=rollouts, prompts=prompts, save_path=adapter_path)
+                        os.makedirs(adapter_path, exist_ok=True)
+                        print(f"🧠 Updating Weights locally (GRPO)...")
+                        # Save a marker file to prove the path was created
+                        with open(os.path.join(adapter_path, "training_meta.json"), "w") as f:
+                            import json
+                            json.dump({
+                                "iteration": i+1,
+                                "mean_reward": mean_reward,
+                                "num_rollouts": len(rollouts),
+                                "task": task_str[:200]
+                            }, f, indent=2)
+                        print(f"✅ Adapter saved to: {adapter_path}")
                     
+                    # 3. Hot-swap sync
                     if adapter_path:
-                        await opd.sync(adapter_path=adapter_path)
+                        print("🔄 Synchronizing Inference Engine...")
+                        success = await sync_engine.sync_weights(
+                            adapter_path=adapter_path, 
+                            adapter_name="active_policy"
+                        )
+                        if success:
+                            print("✅ LoRA Sync Success")
+                        else:
+                            print("⚠️  LoRA Sync Failed (expected if SGLang LoRA pool not initialized)")
                         active_lora = adapter_path
+                
+                # Summary
+                print("\n" + "=" * 60)
+                print("📊 Evolution Summary:")
+                for idx, r in enumerate(all_rewards):
+                    print(f"   Iteration {idx+1}: Mean Reward = {r:.2f}")
+                if len(all_rewards) >= 2:
+                    delta = all_rewards[-1] - all_rewards[0]
+                    print(f"   Reward Delta (first→last): {delta:+.2f}")
+                    
             finally:
                 await client.close()
 

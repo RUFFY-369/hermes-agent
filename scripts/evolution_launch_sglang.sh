@@ -1,14 +1,15 @@
 #!/bin/bash
-# scripts/launch_sglang.sh (H100 Optimized)
-# Configured for Tensor Parallelism and Maximum Throughput
+# scripts/evolution_launch_sglang.sh
+# Configured for LoRA hot-swapping and flexible GPU configs.
+# Supports single GPU (RTX 3090/4090) up to multi-GPU (H100 nodes).
 
-MODEL_PATH=${1:-"meta-llama/Llama-3.1-8B-Instruct"}
+MODEL_PATH=${1:-"TinyLlama/TinyLlama-1.1B-Chat-v1.0"}
 PORT=${2:-30000}
-TP_SIZE=${3:-4} # Default to TP=4 for H100 node
+TP_SIZE=${3:-1}  # Default to TP=1 for single-GPU setups
 
-echo "🚀 Launching SGLang Cluster Engine..."
+echo "🚀 Launching SGLang Inference Server..."
 echo "📍 Model: $MODEL_PATH"
-echo "🛠️ TP: $TP_SIZE | Max Requests: 128 | Static Mem: 0.90"
+echo "🛠️ TP: $TP_SIZE | Port: $PORT"
 
 python -m sglang.launch_server \
     --model-path "$MODEL_PATH" \
@@ -16,10 +17,8 @@ python -m sglang.launch_server \
     --host 0.0.0.0 \
     --tp "$TP_SIZE" \
     --enable-lora \
-    --max-loras-per-batch 8 \
+    --max-loras-per-batch 4 \
     --max-lora-rank 64 \
-    --lora-target-modules all \
-    --mem-fraction-static 0.90 \
-    --max-running-requests 128 \
-    --enable-lora-overlap-loading \
+    --mem-fraction-static 0.80 \
+    --max-running-requests 64 \
     --chunked-prefill-size 4096

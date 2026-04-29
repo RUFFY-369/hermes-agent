@@ -10,17 +10,28 @@ sys.path.append(str(Path(__file__).parent.parent))
 from evolution.tinker import TinkerBridgeTrainer
 
 async def test_tinker_handshake():
-    print("🚀 PHASE 2: Testing Tinker API Bridge & Handshake")
+    print("🚀 PHASE 3: Testing Tinker API Bridge & Handshake")
     print("=" * 60)
 
     # 1. Check API Key
     api_key = os.getenv("TINKER_API_KEY")
+    
     if not api_key:
-        print("❌ ERROR: TINKER_API_KEY not found in environment.")
-        print("Please run: export TINKER_API_KEY=your_key")
+        print("⚠️  TINKER_API_KEY not found in environment.")
+        print("   Testing graceful fallback mode...")
+        
+        # 2. Verify Graceful Fallback
+        bridge = TinkerBridgeTrainer(use_tinker=True)
+        
+        if not bridge.is_active():
+            print("⚠️  TINKER_API_KEY missing. Falling back to local training.")
+            print("✅ Graceful fallback verified — bridge correctly deactivated.")
+            print("\n✅ SUCCESS: Tinker Bridge graceful fallback works correctly.")
+        else:
+            print("❌ ERROR: Bridge should NOT be active without API key!")
         return
 
-    # 2. Initialize Bridge
+    # 3. Initialize Bridge with API key present
     bridge = TinkerBridgeTrainer(use_tinker=True)
     
     if not bridge.is_active():
@@ -30,8 +41,7 @@ async def test_tinker_handshake():
 
     print("📡 [Bridge] Sending test heartbeat to Tinker...")
     
-    # 3. Simulate a Training Request Handshake
-    # We don't want to start a real job, so we just verify the tool loading
+    # 4. Simulate a Training Request Handshake
     try:
         from tools.rl_training_tool import rl_get_current_config
         config = await rl_get_current_config()
