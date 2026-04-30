@@ -44,7 +44,6 @@ class SGLangClient:
 
             response = await session.post(f"{self.base_url}/generate", json=payload)
             if response.status_code != 200:
-                # print(f"SGLang Error: {response.text}")
                 return RolloutResponse(text="")
                 
             data = response.json()
@@ -66,7 +65,6 @@ class SGLangClient:
             
             return RolloutResponse(text=extracted, raw_text=raw_gen, logprobs=logprobs)
         except Exception as e:
-            # print(f"Generate Error: {e}")
             return RolloutResponse(text="")
 
     async def generate_group(self, prompts, **kwargs):

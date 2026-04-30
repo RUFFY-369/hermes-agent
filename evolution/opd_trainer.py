@@ -43,7 +43,7 @@ class OPDTrainer:
         
         return masked_loss
 
-    async def sync(self, adapter_path: str = "/workspace/hermes-rl/output/adapter_active"):
+    async def sync(self, adapter_path: str = "output/adapter_active"):
         """
         Synchronizes the SGLang inference engine with the newly saved PyTorch weights.
         """

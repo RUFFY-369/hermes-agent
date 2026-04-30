@@ -317,16 +317,30 @@ def main(
             active_model = None
             optimizer = None
             if not tinker.is_active():
-                print("Loading GRPO Reference Model (local training mode)...")
                 try:
+                    print("Loading Base Model for Evolution...")
+                    # Initialize Trainer with shared memory structure
+                    import torch
+                    from transformers import AutoModelForCausalLM, AutoTokenizer
+                    model_name = "meta-llama/Llama-3.1-8B-Instruct"
+                    
+                    base_model = AutoModelForCausalLM.from_pretrained(
+                        model_name,
+                        torch_dtype=torch.bfloat16,
+                        device_map="auto"
+                    )
+                    tokenizer = AutoTokenizer.from_pretrained(model_name)
+
                     grpo = GRPOTrainer(
-                        model_name="meta-llama/Llama-3.1-8B-Instruct",
+                        model=base_model,
+                        tokenizer=tokenizer,
                         kl_coeff=0.1
                     )
+                    
                     import peft.import_utils
                     peft.import_utils.is_torchao_available = lambda: False
                     from peft import LoraConfig, get_peft_model
-                    import torch
+                    
                     print("Applying PEFT LoRA to create Active Policy...")
                     lora_config = LoraConfig(
                         r=64,
@@ -336,7 +350,7 @@ def main(
                         bias="none",
                         task_type="CAUSAL_LM"
                     )
-                    active_model = get_peft_model(grpo.ref_model, lora_config)
+                    active_model = get_peft_model(base_model, lora_config)
                     if hasattr(active_model, "gradient_checkpointing_enable"):
                         active_model.gradient_checkpointing_enable()
                     optimizer = torch.optim.AdamW(active_model.parameters(), lr=5e-6)

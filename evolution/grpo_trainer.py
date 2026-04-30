@@ -10,26 +10,32 @@ class GRPOTrainer:
     """
     def __init__(
         self, 
-        model_name: str, 
+        model_name: str = None, 
+        model: torch.nn.Module = None,
+        tokenizer: Any = None,
         clip_eps: float = 0.2, 
         kl_coeff: float = 0.04
     ):
         self.clip_eps = clip_eps
         self.kl_coeff = kl_coeff
         
-        # Load Frozen Reference Model (Isolate to separate GPU memory if possible)
-        print(f"[GRPO] Loading Frozen Reference Model: {model_name}")
-        self.ref_model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            torch_dtype=torch.bfloat16,
-            device_map="auto"
-        )
+        if model is not None:
+            self.ref_model = model
+            self.tokenizer = tokenizer
+        else:
+            # Load Frozen Reference Model
+            print(f"[GRPO] Loading Frozen Reference Model: {model_name}")
+            self.ref_model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=torch.bfloat16,
+                device_map="auto"
+            )
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+
         self.ref_model.eval()
         self.ref_model.requires_grad_(False)
 
-        # Load Tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        if self.tokenizer.pad_token is None:
+        if self.tokenizer and self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
     def _get_logprobs(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
@@ -166,9 +172,6 @@ class GRPOTrainer:
         # Gradient Clipping
         torch.nn.utils.clip_grad_norm_(active_model.parameters(), 1.0)
         
-        import gc
-        gc.collect()
-        torch.cuda.empty_cache()
         optimizer.step()
         return total_loss
 

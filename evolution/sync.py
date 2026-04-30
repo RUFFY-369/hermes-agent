@@ -14,7 +14,7 @@ class LoRASyncEngine:
         self.load_endpoint = f"{sgl_base_url}/load_lora_adapter"
         self.unload_endpoint = f"{sgl_base_url}/unload_lora_adapter"
 
-    async def sync_weights(self, adapter_path: str, adapter_name: str = "hermes-rl-active"):
+    async def sync_weights(self, adapter_path: str, adapter_name: str = "active_policy"):
         """
         Hot-swaps the active LoRA adapter in SGLang.
         
@@ -49,6 +49,6 @@ if __name__ == "__main__":
         engine = LoRASyncEngine()
         print("Testing LoRA Sync Bridge...")
         # Note: This will fail if SGLang is not running or doesn't have the path
-        await engine.sync_weights("/home/ruffy-369/NousResearch/hermes-rl/output/adapter_v1", "test_adapter")
+        await engine.sync_weights("output/adapter_v1", "test_adapter")
 
     asyncio.run(verify())

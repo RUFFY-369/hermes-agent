@@ -63,7 +63,7 @@ class TinkerBridgeTrainer:
             curr_status = status.get("status")
             
             if curr_status in ["completed", "stopped"]:
-                return f"/workspace/hermes-rl/output/tinker_{self.current_run_id}"
+                return f"output/tinker_{self.current_run_id}"
             elif curr_status == "failed":
                 return None
                 
