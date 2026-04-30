@@ -27,11 +27,15 @@ from pathlib import Path
 import fire
 import yaml
 
+<<<<<<< HEAD
 # ============================================================================
 # Config Loading (must be before .env loading)
 # ============================================================================
 
 from hermes_constants import get_hermes_home, OPENROUTER_BASE_URL
+=======
+from hermes_constants import OPENROUTER_BASE_URL, get_hermes_home
+>>>>>>> upstream/main
 
 # Load .env from ~/.hermes/.env first, then project root as dev fallback.
 # User-managed env files should override stale shell exports on restart.
@@ -59,6 +63,7 @@ else:
     os.environ['HERMES_QUIET'] = '1'
     print(f"⚠️  tinker-atropos submodule not found, using: {Path(__file__).parent}")
 
+<<<<<<< HEAD
 # Import agent and tools (lazy — may fail if not installed)
 try:
     from run_agent import AIAgent
@@ -66,6 +71,16 @@ try:
 except ImportError:
     AIAgent = None
     get_missing_keys = lambda: ["TINKER_API_KEY", "WANDB_API_KEY"]
+=======
+# Import agent and tools
+from run_agent import AIAgent
+from tools.rl_training_tool import get_missing_keys
+
+
+# ============================================================================
+# Config Loading
+# ============================================================================
+>>>>>>> upstream/main
 
 DEFAULT_MODEL = "anthropic/claude-opus-4.5"
 DEFAULT_BASE_URL = OPENROUTER_BASE_URL
@@ -555,7 +570,7 @@ def main(
                 
                 # Run the agent
                 print("\n" + "=" * 60)
-                response = agent.run_conversation(user_input)
+                agent.run_conversation(user_input)
                 print("\n" + "=" * 60)
                 
             except KeyboardInterrupt:
@@ -572,7 +587,7 @@ def main(
         print("-" * 40)
         
         try:
-            response = agent.run_conversation(task)
+            agent.run_conversation(task)
             print("\n" + "=" * 60)
             print("✅ Task completed")
         except KeyboardInterrupt:
