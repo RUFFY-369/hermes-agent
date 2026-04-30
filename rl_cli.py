@@ -27,15 +27,11 @@ from pathlib import Path
 import fire
 import yaml
 
-<<<<<<< HEAD
 # ============================================================================
 # Config Loading (must be before .env loading)
 # ============================================================================
 
 from hermes_constants import get_hermes_home, OPENROUTER_BASE_URL
-=======
-from hermes_constants import OPENROUTER_BASE_URL, get_hermes_home
->>>>>>> upstream/main
 
 # Load .env from ~/.hermes/.env first, then project root as dev fallback.
 # User-managed env files should override stale shell exports on restart.
@@ -63,7 +59,6 @@ else:
     os.environ['HERMES_QUIET'] = '1'
     print(f"Warning: tinker-atropos submodule not found, using: {Path(__file__).parent}")
 
-<<<<<<< HEAD
 # Import agent and tools (lazy — may fail if not installed)
 try:
     from run_agent import AIAgent
@@ -71,16 +66,6 @@ try:
 except ImportError:
     AIAgent = None
     get_missing_keys = lambda: ["TINKER_API_KEY", "WANDB_API_KEY"]
-=======
-# Import agent and tools
-from run_agent import AIAgent
-from tools.rl_training_tool import get_missing_keys
-
-
-# ============================================================================
-# Config Loading
-# ============================================================================
->>>>>>> upstream/main
 
 DEFAULT_MODEL = "anthropic/claude-opus-4.5"
 DEFAULT_BASE_URL = OPENROUTER_BASE_URL
@@ -424,9 +409,8 @@ def main(
                             print("Warning: LoRA Sync Failed (expected if SGLang LoRA pool not initialized)")
                         active_lora = adapter_path
                 
-                # Summary
                 print("\n" + "=" * 60)
-                print("📊 Evolution Summary:")
+                print("Evolution Summary:")
                 for idx, r in enumerate(all_rewards):
                     print(f"   Iteration {idx+1}: Mean Reward = {r:.2f}")
                 if len(all_rewards) >= 2:
@@ -467,7 +451,7 @@ def main(
     
     # Handle environment listing
     if list_environments:
-        print("\n📋 Available RL Environments:")
+        print("\nAvailable RL Environments:")
         print("-" * 40)
         try:
             data = list_environments_sync()
@@ -561,7 +545,7 @@ def main(
                     result = asyncio.run(rl_list_runs())
                     runs = json.loads(result)
                     if isinstance(runs, list) and runs:
-                        print("\n📊 Active Runs:")
+                        print("\nActive Runs:")
                         for run in runs:
                             print(f"  - {run['run_id']}: {run['environment']} ({run['status']})")
                     else:
@@ -583,7 +567,7 @@ def main(
                     traceback.print_exc()
     else:
         # Single task mode
-        print(f"\n📝 Task: {task}")
+        print(f"\nTask: {task}")
         print("-" * 40)
         
         try:

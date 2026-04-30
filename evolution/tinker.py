@@ -16,7 +16,7 @@ try:
         rl_get_current_config
     )
 except ImportError:
-    print("⚠️  Warning: Could not import hermes-agent RL tools.")
+    print("Warning: Could not import hermes-agent RL tools.")
     rl_start_training = None
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ class TinkerBridgeTrainer:
         self.tinker_api_key = os.getenv("TINKER_API_KEY")
         
         if self.use_tinker and not self.tinker_api_key:
-            print("⚠️  TINKER_API_KEY missing. Falling back to local training.")
+            print("Warning: TINKER_API_KEY missing. Falling back to local training.")
             self.use_tinker = False
 
     async def train_step(self, rewards: List[float], rollouts: List[Any], task: str) -> Optional[str]:
@@ -43,7 +43,7 @@ class TinkerBridgeTrainer:
         if not self.use_tinker:
             return None
 
-        print(f"☁️  [TinkerBridge] Offloading training step to Tinker Cloud...")
+        print(f"[TinkerBridge] Offloading training step to Tinker Cloud...")
         
         await rl_select_environment("coding_gen") 
         await rl_edit_config("total_steps", 100) 

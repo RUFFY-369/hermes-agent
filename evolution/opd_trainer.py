@@ -47,13 +47,13 @@ class OPDTrainer:
         """
         Synchronizes the SGLang inference engine with the newly saved PyTorch weights.
         """
-        print("🔄 [OPD] Triggering LoRA Hot-Swap...")
+        print("[OPD] Triggering LoRA Hot-Swap...")
         # Use 'active_policy' as the persistent name in SGLang
         success = await self.sync_engine.sync_weights(
             adapter_path=adapter_path, 
             adapter_name="active_policy"
         )
         if success:
-            print("✅ [OPD] SGLang Inference Engine Synchronized.")
+            print("[OPD] SGLang Inference Engine Synchronized.")
         else:
-            print("⚠️ [OPD] SGLang Sync Failed. Iteration 2 may use stale weights.")
+            print("Warning: [OPD] SGLang Sync Failed. Iteration 2 may use stale weights.")
