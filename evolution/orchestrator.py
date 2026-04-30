@@ -59,13 +59,36 @@ class GASPOrchestrator:
         else:
             self.teacher_session = None
 
-    async def _get_teacher_task(self, last_task: str = None) -> str:
-        base_task = (
-            "Write a Python function called solve() that returns the number of valid N-Queens solutions for N=8. "
-            "STRICT CONSTRAINT: You must not use the 'if' keyword anywhere in your code. "
-            "Rely entirely on boolean short-circuiting or array masking."
-        )
-        return base_task
+    async def _get_teacher_task(self) -> str:
+        tasks = [
+            (
+                "Write a Python function called solve() that returns the number of valid N-Queens solutions for N=8. "
+                "STRICT CONSTRAINT: You must not use the 'if' keyword anywhere in your code. "
+                "Rely entirely on boolean short-circuiting or array masking."
+            ),
+            (
+                "Write a Python function called solve() that takes a 3x3 matrix (list of lists) and returns it rotated 90 degrees clockwise. "
+                "STRICT CONSTRAINT: You must not use any 'for' or 'while' loops. "
+                "Use list comprehensions, `zip(*)`, or map/lambda."
+            ),
+            (
+                "Write a Python function called solve() that returns the 10th Fibonacci number. "
+                "STRICT CONSTRAINT: You must not use the '+' operator. "
+                "Use bitwise operations or `sum()` for addition."
+            ),
+            (
+                "Write a Python function called solve() that returns all prime numbers up to 50 using a sieve. "
+                "STRICT CONSTRAINT: You must not use the 'range()' function. "
+                "Use `slice()` or direct list manipulation instead."
+            )
+        ]
+        # Use iteration count or random to select task
+        # Since we don't have iteration count here easily, we'll use a simple rotation based on a hidden state
+        if not hasattr(self, "_task_idx"):
+            self._task_idx = 0
+        task = tasks[self._task_idx % len(tasks)]
+        self._task_idx += 1
+        return task
 
     async def run_iteration(self, lora_path: str = None):
         task = await self._get_teacher_task()

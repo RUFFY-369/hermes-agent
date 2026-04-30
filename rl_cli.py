@@ -314,19 +314,42 @@ def main(
             # Note: GRPOTrainer loads a reference model into VRAM.
             # Only initialize if we're doing local training (no Tinker).
             grpo = None
+            active_model = None
+            optimizer = None
             if not tinker.is_active():
                 print("🧠 Loading GRPO Reference Model (local training mode)...")
                 try:
-                    grpo = GRPOTrainer(model_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+                    grpo = GRPOTrainer(
+                        model_name="meta-llama/Llama-3.1-8B-Instruct",
+                        kl_coeff=0.1
+                    )
+                    import peft.import_utils
+                    peft.import_utils.is_torchao_available = lambda: False
+                    from peft import LoraConfig, get_peft_model
+                    import torch
+                    print("🧠 Applying PEFT LoRA to create Active Policy...")
+                    lora_config = LoraConfig(
+                        r=64,
+                        lora_alpha=16,
+                        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+                        lora_dropout=0.05,
+                        bias="none",
+                        task_type="CAUSAL_LM"
+                    )
+                    active_model = get_peft_model(grpo.ref_model, lora_config)
+                    if hasattr(active_model, "gradient_checkpointing_enable"):
+                        active_model.gradient_checkpointing_enable()
+                    optimizer = torch.optim.AdamW(active_model.parameters(), lr=5e-6)
                 except Exception as e:
-                    print(f"⚠️  GRPO Reference Model load failed: {e}")
-                    print("   Continuing without reference model (rewards-only mode).")
+                    print(f"⚠️  GRPO load failed: {e}")
+                    import traceback
+                    traceback.print_exc()
             
             try:
                 orchestrator = GASPOrchestrator(
                     client, sandbox, grpo, opd, prm, 
                     tinker_bridge=tinker,
-                    group_size=4  # Start small for validation
+                    group_size=64  # Production scale
                 )
                 
                 active_lora = None
@@ -351,6 +374,17 @@ def main(
                         adapter_path = f"output/adapter_v{i+1}"
                         os.makedirs(adapter_path, exist_ok=True)
                         print(f"🧠 Updating Weights locally (GRPO)...")
+                        
+                        if active_model is not None and optimizer is not None and grpo is not None:
+                            try:
+                                loss = grpo.update(active_model, optimizer, prompts, rollouts, rewards)
+                                print(f"📉 Training Loss: {loss:.4f}")
+                                active_model.save_pretrained(adapter_path)
+                            except Exception as e:
+                                print(f"⚠️  Local training failed: {e}")
+                                import traceback
+                                traceback.print_exc()
+
                         # Save a marker file to prove the path was created
                         with open(os.path.join(adapter_path, "training_meta.json"), "w") as f:
                             import json

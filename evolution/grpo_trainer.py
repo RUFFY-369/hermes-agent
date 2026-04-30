@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
-from transformers import AutoModelForCausalLM
-from typing import Tuple, Dict
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from typing import Tuple, Dict, List, Any
 
 class GRPOTrainer:
     """
@@ -27,6 +27,11 @@ class GRPOTrainer:
         self.ref_model.eval()
         self.ref_model.requires_grad_(False)
 
+        # Load Tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
     def _get_logprobs(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         """Helper to extract logprobs for selected tokens."""
         # Shift logits and labels for next-token prediction
@@ -44,46 +49,127 @@ class GRPOTrainer:
 
     def compute_loss(
         self,
-        model: torch.nn.Module,      # The active policy (LoRA)
+        active_model: torch.nn.Module,
         inputs: Dict[str, torch.Tensor],
-        logprobs: torch.Tensor,      # Active policy logprobs from rollout
-        rewards: torch.Tensor,       # [G] Shaped dense rewards
+        active_logprobs: torch.Tensor,
+        advantages: torch.Tensor,
         attention_mask: torch.Tensor
     ) -> torch.Tensor:
         """
-        Computes the GRPO loss with True KL Penalty.
+        Computes the GRPO clipped surrogate objective and KL penalty.
         """
         # 1. Calculate True Reference Logprobs (Frozen pass)
         with torch.no_grad():
-            ref_outputs = self.ref_model(**inputs)
+            if hasattr(self.ref_model, "disable_adapter"):
+                with self.ref_model.disable_adapter():
+                    ref_outputs = self.ref_model(**inputs)
+            else:
+                ref_outputs = self.ref_model(**inputs)
             ref_logprobs = self._get_logprobs(ref_outputs.logits, inputs["labels"])
 
-        # 2. Group Relative Advantage (Normalized across the massive G batch)
-        # Using shaped rewards from sandbox.py
-        mean_reward = rewards.mean()
-        std_reward = rewards.std() + 1e-8
-        advantages = (rewards - mean_reward) / std_reward
+        # 2. Probability Ratio
+        ratio = torch.exp(active_logprobs - ref_logprobs)
         
-        # Expand for token-wise multiplication
-        # Note: logprobs shape [G, seq_len-1] due to shift
-        advantages = advantages.unsqueeze(1).expand_as(logprobs)
-
-        # 3. PPO-Clipped Surrogate Loss
-        # We compare active logprobs against reference logprobs
-        ratio = torch.exp(logprobs - ref_logprobs.detach())
-        
+        # 3. Clipped Surrogate Objective
+        advantages = advantages.unsqueeze(1) # Broadcast across sequence
         surr1 = ratio * advantages
         surr2 = torch.clamp(ratio, 1.0 - self.clip_eps, 1.0 + self.clip_eps) * advantages
-        
         policy_loss = -torch.min(surr1, surr2)
-        policy_loss = (policy_loss * attention_mask[:, 1:]).sum() / (attention_mask[:, 1:].sum() + 1e-8)
+        
+        # 4. Stable KL Penalty (Masked to prevent NaN from inf * 0)
+        log_ratio = ref_logprobs - active_logprobs
+        kl = torch.exp(log_ratio) - log_ratio - 1.0
+        kl = torch.where(attention_mask[:, 1:].bool(), kl, torch.zeros_like(kl))
+        
+        # 5. Combined Loss
+        loss = policy_loss + self.kl_coeff * kl
+        
+        # Mask out prompts and return mean
+        loss = loss * attention_mask[:, 1:]
+        return loss.sum() / (attention_mask[:, 1:].sum() + 1e-8)
 
-        # 4. Exact KL Divergence Penalty
-        # D_KL(ref || active) = sum(pi_ref * (log pi_ref - log pi_active))
-        kl = torch.exp(ref_logprobs) * (ref_logprobs - logprobs)
-        kl_loss = (kl * attention_mask[:, 1:]).sum() / (attention_mask[:, 1:].sum() + 1e-8)
-
-        total_loss = policy_loss + self.kl_coeff * kl_loss
+    def update(
+        self,
+        active_model: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
+        prompts: List[str],
+        rollouts: List[Any],
+        rewards: List[float]
+    ) -> float:
+        """
+        Runs one step of PPO/GRPO optimization with mini-batching to prevent OOM.
+        """
+        active_model.train()
+        optimizer.zero_grad()
+        
+        # Compute global advantages across the entire group
+        rewards_tensor = torch.tensor(rewards, dtype=torch.float32, device=self.ref_model.device)
+        mean_reward = rewards_tensor.mean()
+        std_reward = rewards_tensor.std() + 1e-8
+        global_advantages = (rewards_tensor - mean_reward) / std_reward
+        
+        mini_batch_size = 1
+        total_loss = 0.0
+        num_mini_batches = max(1, len(prompts) // mini_batch_size)
+        
+        for i in range(0, len(prompts), mini_batch_size):
+            mb_prompts = prompts[i:i+mini_batch_size]
+            mb_rollouts = rollouts[i:i+mini_batch_size]
+            mb_advantages = global_advantages[i:i+mini_batch_size]
+            
+            # 1. Tokenize prompts + generations
+            full_texts = [p + r.raw_text for p, r in zip(mb_prompts, mb_rollouts)]
+            inputs = self.tokenizer(
+                full_texts, 
+                return_tensors="pt", 
+                padding=True, 
+                truncation=True, 
+                max_length=1500
+            )
+            inputs = {k: v.to(self.ref_model.device) for k, v in inputs.items()}
+            inputs["labels"] = inputs["input_ids"].clone()
+            
+            # 2. Mask out prompt tokens from loss
+            prompt_inputs = self.tokenizer(
+                mb_prompts, 
+                return_tensors="pt", 
+                padding=True, 
+                truncation=True, 
+                max_length=1500
+            )
+            prompt_lens = prompt_inputs["attention_mask"].sum(dim=1).tolist()
+            
+            attention_mask = inputs["attention_mask"].clone()
+            for j, length in enumerate(prompt_lens):
+                attention_mask[j, :length] = 0
+                
+            # 3. Forward pass to get active policy logprobs
+            outputs = active_model(**inputs)
+            active_logprobs = self._get_logprobs(outputs.logits, inputs["labels"])
+            
+            # 4. Compute Loss using pre-computed advantages
+            loss = self.compute_loss(
+                active_model, 
+                inputs, 
+                active_logprobs, 
+                mb_advantages, 
+                attention_mask
+            )
+            
+            # Scale loss for gradient accumulation
+            loss = loss / num_mini_batches
+            
+            # 5. Backpropagate
+            loss.backward()
+            total_loss += loss.item() * num_mini_batches
+            
+        # Gradient Clipping
+        torch.nn.utils.clip_grad_norm_(active_model.parameters(), 1.0)
+        
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
+        optimizer.step()
         return total_loss
 
 if __name__ == "__main__":
