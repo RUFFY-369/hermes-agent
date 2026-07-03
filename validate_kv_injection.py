@@ -97,49 +97,97 @@ def dequantize_q4_per_channel(packed: np.ndarray, scales: np.ndarray,
 
 @dataclass
 class StoredKVCache:
-    """Serializable KV-cache snapshot."""
+    """Serializable KV-cache snapshot with position-agnostic keys."""
     model_name: str
     num_layers: int
     num_kv_heads: int
     head_dim: int
     seq_len: int
     # Per-layer: packed (K_q4, V_q4) and their scales
-    layers: list[dict]  # [{"k_packed": ..., "k_scales": ..., "v_packed": ..., "v_scales": ...}]
+    # Keys are stored UNROTATED (RoPE stripped) for position-agnostic injection
+    layers: list[dict]
     metadata: dict
 
 
-def capture_kv_cache(past_key_values, model_name: str,
-                      channel_size: int = 128) -> StoredKVCache:
-    """Capture and Q4-quantize full KV-cache from a model's past_key_values.
+# ═══════════════════════════════════════════════════════════════════════════════
+# RoPE utilities — strip and re-apply rotary position embeddings
+# ═══════════════════════════════════════════════════════════════════════════════
 
-    Returns a StoredKVCache that can be serialized to disk and later
-    dequantized for injection into a new conversation.
+def _get_rope_cos_sin(model, device, seq_len: int, offset: int = 0):
+    """Extract cos/sin tables from the model's rotary embedding.
+
+    Returns (cos, sin) as float16 tensors of shape (1, 1, seq_len, head_dim).
+    """
+    rotary_emb = None
+    for module in model.modules():
+        if "RotaryEmbedding" in module.__class__.__name__:
+            rotary_emb = module
+            break
+    if rotary_emb is None:
+        raise RuntimeError("Could not find RotaryEmbedding module")
+
+    # Build position IDs and call the rotary embedding
+    position_ids = torch.arange(offset, offset + seq_len, device=device).unsqueeze(0)
+    # Qwen2RotaryEmbedding.forward(x, position_ids) -> (cos, sin)
+    dummy = torch.zeros(1, 1, seq_len, 1, device=device, dtype=torch.float16)
+    cos, sin = rotary_emb(dummy, position_ids)
+    return cos.to(dtype=torch.float16), sin.to(dtype=torch.float16)
+
+
+def _rotate_half(x: torch.Tensor) -> torch.Tensor:
+    """RoPE rotation helper: swap half-dimensions with sign flip."""
+    d = x.shape[-1] // 2
+    x1, x2 = x[..., :d], x[..., d:]
+    return torch.cat([-x2, x1], dim=-1)
+
+
+def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
+    """Apply RoPE. x: (B,H,S,D), cos/sin: (B,S,D) -> unsqueeze to (B,1,S,D)."""
+    cos = cos.unsqueeze(1)
+    sin = sin.unsqueeze(1)
+    return (x * cos) + (_rotate_half(x) * sin)
+
+
+def unapply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
+    """Inverse RoPE. x: (B,H,S,D), cos/sin: (B,S,D) -> unsqueeze to (B,1,S,D)."""
+    cos = cos.unsqueeze(1)
+    sin = sin.unsqueeze(1)
+    return (x * cos) - (_rotate_half(x) * sin)
+
+
+def capture_kv_cache_rope_aware(model, past_key_values, model_name: str,
+                                  channel_size: int = 128) -> StoredKVCache:
+    """Capture KV-cache with RoPE stripped from keys for position-agnostic storage.
+
+    Keys are unrotated before quantization so they can be injected at any
+    position offset later. Values are stored as-is (no position encoding).
     """
     num_layers = len(past_key_values)
-    # Extract first layer to get shapes
     first_k, first_v = _get_kv(past_key_values, 0)
     num_kv_heads = first_k.shape[1]
     head_dim = first_k.shape[3]
     seq_len = first_k.shape[2]
+    device = first_k.device
+
+    # Get position encodings for positions [0, seq_len)
+    cos, sin = _get_rope_cos_sin(model, device, seq_len, offset=0)
 
     layers = []
     for layer_idx in range(num_layers):
         k, v = _get_kv(past_key_values, layer_idx)
-        k_np = k[0].float().cpu().numpy()  # (H, S, D)
+        # Unrotate keys: strip RoPE (k is 4D: B,H,S,D; cos/sin are 3D: B,S,D)
+        k_unrotated = unapply_rope(k.float(), cos, sin)[0]  # [0] to remove batch
+        k_np = k_unrotated.cpu().numpy()
         v_np = v[0].float().cpu().numpy()
 
-        # Q4 quantize each head independently
         k_packed_parts, k_scale_parts = [], []
         v_packed_parts, v_scale_parts = [], []
 
         for h in range(num_kv_heads):
-            # Flatten head: (S, D) → (S*D,)
             k_head = k_np[h].ravel()
             v_head = v_np[h].ravel()
-
             k_p, k_s = quantize_q4_per_channel(k_head, channel_size)
             v_p, v_s = quantize_q4_per_channel(v_head, channel_size)
-
             k_packed_parts.append(k_p)
             k_scale_parts.append(k_s)
             v_packed_parts.append(v_p)
@@ -155,20 +203,18 @@ def capture_kv_cache(past_key_values, model_name: str,
         })
 
     return StoredKVCache(
-        model_name=model_name,
-        num_layers=num_layers,
-        num_kv_heads=num_kv_heads,
-        head_dim=head_dim,
-        seq_len=seq_len,
-        layers=layers,
-        metadata={},
+        model_name=model_name, num_layers=num_layers, num_kv_heads=num_kv_heads,
+        head_dim=head_dim, seq_len=seq_len, layers=layers, metadata={"rope_aware": True},
     )
 
 
-def dequantize_kv_cache(stored: StoredKVCache) -> list[tuple[torch.Tensor, torch.Tensor]]:
-    """Dequantize a StoredKVCache back into past_key_values format.
+def dequantize_kv_cache(stored: StoredKVCache,
+                         model=None,
+                         position_offset: int = 0) -> list[tuple[torch.Tensor, torch.Tensor]]:
+    """Dequantize StoredKVCache back into past_key_values format.
 
-    Returns list of (K, V) tuples, each as torch tensors on CPU.
+    If model is provided and the cache was stored with RoPE stripped,
+    keys are re-rotated at position_offset for correct injection.
     """
     dequantized = []
     for layer_idx, layer_data in enumerate(stored.layers):
@@ -182,11 +228,8 @@ def dequantize_kv_cache(stored: StoredKVCache) -> list[tuple[torch.Tensor, torch
         v_packed = layer_data["v_packed"]
         v_scales = layer_data["v_scales"]
 
-        # Split scales per head
         k_scales_per_head = np.split(k_scales, num_heads)
         v_scales_per_head = np.split(v_scales, num_heads)
-
-        # Split packed per head (each head: elements_per_head / 2 bytes for 4-bit)
         k_bytes_per_head = elements_per_head // 2
         v_bytes_per_head = elements_per_head // 2
 
@@ -200,13 +243,11 @@ def dequantize_kv_cache(stored: StoredKVCache) -> list[tuple[torch.Tensor, torch
 
             k_h = dequantize_q4_per_channel(
                 k_h_packed, k_scales_per_head[h],
-                channel_size=head_dim,
-                original_len=elements_per_head,
+                channel_size=head_dim, original_len=elements_per_head,
             ).reshape(seq_len, head_dim)
             v_h = dequantize_q4_per_channel(
                 v_h_packed, v_scales_per_head[h],
-                channel_size=head_dim,
-                original_len=elements_per_head,
+                channel_size=head_dim, original_len=elements_per_head,
             ).reshape(seq_len, head_dim)
 
             k_heads.append(torch.from_numpy(k_h))
@@ -214,6 +255,12 @@ def dequantize_kv_cache(stored: StoredKVCache) -> list[tuple[torch.Tensor, torch
 
         k_tensor = torch.stack(k_heads, dim=0).unsqueeze(0)  # (1, H, S, D)
         v_tensor = torch.stack(v_heads, dim=0).unsqueeze(0)
+
+        # Re-apply RoPE at the injection position if needed
+        if model is not None and stored.metadata.get("rope_aware"):
+            cos, sin = _get_rope_cos_sin(model, k_tensor.device, seq_len, offset=position_offset)
+            k_tensor = apply_rope(k_tensor.float(), cos, sin)
+
         dequantized.append((k_tensor, v_tensor))
 
     return dequantized
@@ -373,17 +420,15 @@ def main():
         print("ERROR: No KV-cache returned. Aborting.")
         sys.exit(1)
 
-    # Capture + Q4 quantize
+    # Capture + Q4 quantize (RoPE-aware: strip position encoding from keys)
     t1 = time.perf_counter()
-    stored = capture_kv_cache(past_kv, args.model, channel_size=128)
+    stored = capture_kv_cache_rope_aware(model, past_kv, args.model, channel_size=128)
     capture_time = time.perf_counter() - t1
 
     storage = compute_storage_size(stored)
-    print(f"  Captured: {storage['num_layers']} layers × {storage['num_kv_heads']} heads "
-          f"× {storage['head_dim']}d × {storage['seq_len']} tokens")
-    print(f"  FP16 size: {storage['fp16_mb']}MB → Q4: {storage['total_q4_mb']}MB "
-          f"({storage['compression_ratio']}× compression)")
-    print(f"  Capture + quantize time: {capture_time*1000:.0f}ms")
+    print(f"  Captured (RoPE-stripped): {storage['num_layers']}L x {storage['num_kv_heads']}H")
+    print(f"  FP16: {storage['fp16_mb']}MB -> Q4: {storage['total_q4_mb']}MB ({storage['compression_ratio']}x)")
+    print(f"  Capture + quantize: {capture_time*1000:.0f}ms")
 
     # ── Step 3: Generate response WITHOUT injection (baseline) ──────────
     print("\n── Step 3: Baseline — recall WITHOUT KV injection ──")
@@ -408,18 +453,14 @@ def main():
     # ── Step 4: Generate WITH KV injection ──────────────────────────────
     print("\n── Step 4: Recall WITH injected KV-cache ──")
 
-    # Dequantize stored KV-cache
-    dequantized_kv = dequantize_kv_cache(stored)
-    print(f"  Dequantized {len(dequantized_kv)} layers from Q4 storage")
+    # Dequantize + re-apply RoPE at position 0 (prefix injection)
+    dequantized_kv = dequantize_kv_cache(stored, model=model, position_offset=0)
+    print(f"  Dequantized {len(dequantized_kv)} layers (RoPE re-applied at pos 0)")
 
-    # Process recall query with injected KV-cache as prefix.
-    # We manually forward the recall query through the model, then generate
-    # token-by-token using the combined cache. This avoids generate()'s cache
-    # management which doesn't support externally-created prefix caches.
+    # Inject prefix KV-cache: build DynamicCache, use generate() with
+    # full attention_mask spanning prefix+suffix positions.
     with torch.no_grad():
         from transformers import DynamicCache
-
-        # Step 4a: Build combined cache: injected teaching KV + fresh cache shell
         combined_cache = DynamicCache()
         for layer_idx, (inj_k, inj_v) in enumerate(dequantized_kv):
             combined_cache.update(
@@ -427,40 +468,22 @@ def main():
                 inj_v.to(device=device, dtype=torch.float16),
                 layer_idx,
             )
-
-        # Step 4b: Forward the recall query through the model, extending the cache
-        recall_out = model(
+        # Full attention mask: prefix + suffix tokens
+        full_mask = torch.ones(1, teach_len + recall_inputs["input_ids"].shape[1],
+                               device=device)
+        injected_out = model.generate(
             input_ids=recall_inputs["input_ids"],
-            attention_mask=recall_inputs.get("attention_mask"),
+            attention_mask=full_mask,
             past_key_values=combined_cache,
-            use_cache=True,
+            max_new_tokens=args.max_new_tokens,
+            do_sample=False,
         )
-        extended_cache = recall_out.past_key_values
-        next_logits = recall_out.logits[:, -1, :]  # logits for next token
 
-        # Step 4c: Manual greedy generation from the extended cache
-        generated_ids = []
-        for _ in range(args.max_new_tokens):
-            next_token_id = torch.argmax(next_logits, dim=-1).unsqueeze(0)
-            generated_ids.append(next_token_id.item())
-
-            # Stop at EOS
-            if next_token_id.item() == tokenizer.eos_token_id:
-                break
-
-            # Forward the new token
-            step_out = model(
-                input_ids=next_token_id,
-                past_key_values=extended_cache,
-                use_cache=True,
-            )
-            extended_cache = step_out.past_key_values
-            next_logits = step_out.logits[:, -1, :]
-
-        injected_ids = generated_ids
-
-    injected_response = tokenizer.decode(injected_ids, skip_special_tokens=True)
-    print(f"  Injected response: \"{injected_response[:300]}\"")
+    injected_response = tokenizer.decode(
+        injected_out[0][recall_inputs["input_ids"].shape[1]:],
+        skip_special_tokens=True,
+    )
+    print(f"  Injected: \"{injected_response[:300]}\"")
 
     # ── Step 5: Analysis ────────────────────────────────────────────────
     print("\n── Step 5: Analysis ──")
@@ -480,18 +503,13 @@ def main():
     print(f"  Injected recall (KV-cache):     {injected_hits}/3 facts recalled")
 
     if injected_hits > baseline_hits:
-        print("\n  ✓ KV-CACHE INJECTION WORKS")
+        print("\n  >> KV-CACHE INJECTION WORKS (RoPE-aware)")
+        print("    Keys stored unrotated, re-rotated at injection position.")
+        print("    Model recalls taught facts without text in context window.")
+    elif injected_hits == baseline_hits:
+        print("\n  >> No improvement — check RoPE rotation correctness")
     else:
-        print("\n  ⚠ Naive injection insufficient — RoPE position mismatch")
-        print("    The injected KV-cache has position encodings from positions")
-        print("    0-{prefix_len}, but the suffix query expects its own positions")
-        print("    starting at 0. The model can't reconcile these two position spaces.")
-        print()
-        print("    Q4 compression/decompression is CORRECT (3.8x, 35ms).")
-        print("    The bottleneck is RoPE-aware injection — stripping position")
-        print("    encodings before storage and re-applying them during injection.")
-        print("    This requires Phase 3: vLLM prefix-cache integration or SGLang")
-        print("    RadixAttention, which handle position re-encoding internally.")
+        print("\n  >> UNEXPECTED")
 
     # ── Storage metrics ──────────────────────────────────────────────────
     print(f"\n── Storage Summary ──")
