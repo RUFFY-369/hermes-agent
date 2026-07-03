@@ -385,8 +385,8 @@ class KVMemoryProvider(MemoryProvider):
         On reset/rewind: link sessions, reset turn counter.
         On resume: continue counting from where we left off.
         """
+        self._session_id = new_session_id
         if reset:
-            # Link old → new session
             if parent_session_id and self._db:
                 try:
                     self._db.link_sessions(
@@ -399,8 +399,6 @@ class KVMemoryProvider(MemoryProvider):
         elif rewound:
             self._turn_number = 0
         else:
-            # Resuming — preserve turn counter, ensure session record
-            self._session_id = new_session_id
             if self._db:
                 self._db.ensure_session(new_session_id)
 

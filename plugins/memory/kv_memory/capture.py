@@ -73,9 +73,9 @@ class SentenceTransformersBackend(EmbeddingBackend):
     @property
     def embedding_dim(self) -> int:
         if self._model is not None:
-            meth = getattr(self._model, "get_sentence_embedding_dimension", None)
+            meth = getattr(self._model, "get_embedding_dimension", None)
             if meth is None:
-                meth = getattr(self._model, "get_embedding_dimension", None)
+                meth = getattr(self._model, "get_sentence_embedding_dimension", None)
             if meth is not None:
                 return meth()
         return 384  # default for all-MiniLM-L6-v2
@@ -104,25 +104,20 @@ class SentenceTransformersBackend(EmbeddingBackend):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Backend: vLLM Hidden State Capture (Phase 2 — placeholder)
+# Backend: vLLM Hidden State Capture (future)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class vLLMHiddenStateBackend(EmbeddingBackend):
-    """Capture hidden states from vLLM's inference engine.
+    """Capture hidden states from a locally-running vLLM inference server.
 
-    PHASE 2 STATUS (July 2026):
-      - Q4 KV-cache compression: VERIFIED (3.8x, <50ms, correct round-trip)
-      - Naive KV-cache injection: BLOCKED by RoPE position encoding mismatch
-      - Required for production: RoPE stripping before storage, re-application
-        during injection, or vLLM prefix-cache integration (Phase 3).
+    This backend requires vLLM to expose hidden states via its HTTP API
+    or a custom endpoint. As of vLLM 0.24, this is not yet supported.
+    When available, it will enable true model-native embeddings —
+    capturing the inference model's own internal representations rather
+    than using a separate embedding model.
 
-    The core compression pipeline is proven. The injection bottleneck is
-    position-aware cache merging — vLLM's prefix-cache and SGLang's
-    RadixAttention handle this internally. See validate_kv_injection.py
-    for the full experimental results.
-
-    For Phase 1, this backend reports unavailable and falls back to
-    sentence-transformers (Mode B).
+    Until then, this backend reports unavailable and the system falls
+    back to sentence-transformers.
     """
 
     def __init__(self, model_name: str = ""):
