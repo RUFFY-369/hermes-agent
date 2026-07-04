@@ -1,4 +1,4 @@
-name: kv-memory
+name: kv_memory
 version: 0.1.0
 kind: exclusive
 description: >-
