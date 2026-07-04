@@ -1,0 +1,17 @@
+name: multi-criteria-test
+description: "Task with multiple weighted success criteria to test composite scoring"
+domain: test
+complexity: 3
+success_criteria:
+  - type: test_pass
+    command: "true"
+    weight: 0.3
+  - type: test_pass
+    command: "echo ok"
+    weight: 0.3
+  - type: command_output
+    command: "echo hello world"
+    expected_output: "hello"
+    weight: 0.4
+timeout_seconds: 10
+max_turns: 3

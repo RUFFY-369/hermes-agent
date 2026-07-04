@@ -1,0 +1,14 @@
+name: file-operations
+description: "Create a file with specific content and verify it exists with correct permissions"
+domain: software-development
+complexity: 2
+success_criteria:
+  - type: file_exists
+    path: /tmp/evo-test-output.txt
+    weight: 1.0
+  - type: content_match
+    path: /tmp/evo-test-output.txt
+    pattern: "evolution.*test.*passed"
+    weight: 1.0
+timeout_seconds: 30
+max_turns: 5

@@ -299,6 +299,7 @@ from hermes_cli.subcommands.memory import build_memory_parser
 from hermes_cli.subcommands.acp import build_acp_parser
 from hermes_cli.subcommands.tools import build_tools_parser
 from hermes_cli.subcommands.insights import build_insights_parser
+from hermes_cli.subcommands.evolution import build_evolution_parser
 from hermes_cli.subcommands.skills import build_skills_parser
 from hermes_cli.subcommands.pairing import build_pairing_parser
 from hermes_cli.subcommands.plugins import build_plugins_parser
@@ -12627,6 +12628,29 @@ def cmd_insights(args):
         print(f"Error generating insights: {e}")
 
 
+def cmd_evolution(args):
+    """Dispatch `hermes evolution <subcommand>` to the evolution_cmd module."""
+    try:
+        from hermes_cli.evolution_cmd import _cmd_status, _cmd_define_task, _cmd_list_tasks, _cmd_history, _cmd_variants, _cmd_enable, _cmd_disable, _cmd_run, _cmd_benchmark
+        action = getattr(args, "evolution_action", None) or "status"
+        dispatch = {
+            "status": _cmd_status,
+            "define-task": _cmd_define_task,
+            "list-tasks": _cmd_list_tasks,
+            "history": _cmd_history,
+            "variants": _cmd_variants,
+            "enable": _cmd_enable,
+            "disable": _cmd_disable,
+            "run": _cmd_run,
+            "benchmark": _cmd_benchmark,
+        }
+        handler = dispatch.get(action, _cmd_status)
+        sys.exit(handler(args))
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+
 def cmd_skills(args):
     # Route 'config' action to skills_config module
     if getattr(args, "skills_action", None) == "config":
@@ -13711,6 +13735,11 @@ def main():
     # insights command  (parser built in hermes_cli/subcommands/insights.py)
     # =========================================================================
     build_insights_parser(subparsers, cmd_insights=cmd_insights)
+
+    # =========================================================================
+    # evolution command
+    # =========================================================================
+    build_evolution_parser(subparsers, cmd_evolution=cmd_evolution)
 
     # =========================================================================
     # claw command  (parser built in hermes_cli/subcommands/claw.py)

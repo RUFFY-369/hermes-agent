@@ -77,6 +77,7 @@ from agent.evolution.failure_analyzer import (
 from agent.evolution.improvement_proposer import ImprovementProposal, ImprovementProposer
 from agent.evolution.regression_gate import GateResult, GateVerdict, RegressionGate
 from agent.evolution.harness_variants import HarnessVariant, VariantManager
+from agent.evolution.auxiliary_llm import EvolutionLLMClient, get_evolution_llm
 
 __all__ = [
     # Config
@@ -124,4 +125,7 @@ __all__ = [
     # Variants
     "VariantManager",
     "HarnessVariant",
+    # Auxiliary LLM
+    "EvolutionLLMClient",
+    "get_evolution_llm",
 ]
