@@ -288,7 +288,7 @@ class EvolutionManager:
                     status="success" if (run.eval_result and run.eval_result.passed) else "failed"
                 )
 
-            # Save trajectory
+            # Save trajectory and finalize status
             if run.trajectory:
                 try:
                     trace_path = run.collector.save()
@@ -298,6 +298,7 @@ class EvolutionManager:
                         trace_path=str(trace_path),
                         completed_at=datetime.now(timezone.utc).isoformat(),
                         final_score=run.eval_result.score if run.eval_result else None,
+                        iterations=run.iteration,
                     )
                 except Exception as e:
                     logger.warning("Failed to save trajectory: %s", e)
@@ -353,6 +354,7 @@ class EvolutionManager:
                 variant.record_result(run.task.name, result.score, True)
             logger.info("Task '%s' SUCCEEDED (score=%.2f, run=%s)", run.task.name, result.score, run.run_id)
         else:
+            run.status = TaskStatus.FAILED
             logger.info("Task '%s' FAILED (score=%.2f, run=%s)", run.task.name, result.score, run.run_id)
 
         return result
