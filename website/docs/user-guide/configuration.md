@@ -599,6 +599,42 @@ skills:
 
 When on, skill writes are staged under `~/.hermes/pending/skills/` and reviewed with `/skills pending`, `/skills diff <id>`, `/skills approve <id>`, `/skills reject <id>` — from the CLI or any messaging platform. Toggle at runtime with `/skills approval on|off`. Memory has the same gate (`memory.write_approval`, below). Full walkthrough: [Gating agent skill writes](/user-guide/features/skills#gating-agent-skill-writes-skillswrite_approval).
 
+## Evolution Engine Configuration
+
+The Evolution Engine gives Hermes autonomous evaluation and self-improvement capabilities — it scores agent task attempts, analyzes failures, proposes fixes, and applies them. See [Evolution Engine](/user-guide/features/evolution) for the full guide.
+
+```yaml
+evolution:
+  enabled: false            # Master on/off switch (default: false)
+  mode: on_failure          # "on_failure" | "continuous" | "manual"
+  max_iterations: 5         # Max improvement attempts per task (1-20)
+
+  # Regression gate — prevents fixes from breaking previously-solved tasks
+  regression_gate:
+    enabled: true
+    max_regression_tasks: 20  # Max prior tasks to check for regression
+
+  # Safety — which improvement types need human approval
+  safety:
+    require_approval_for: [tool_create, tool_modify, prompt_modify]
+    auto_approve: [skill_create, skill_patch]
+
+  # Storage
+  trace_retention_days: 90
+  max_trace_size_bytes: 10485760  # 10MB per trace
+
+  # Optional: route evolution work to a different/cheaper model
+  auxiliary_provider: deepseek     # defaults to main model if unset
+  auxiliary_model: deepseek-chat
+```
+
+Enable it:
+```bash
+hermes evolution enable
+```
+
+Define a task, run benchmarks, and let the engine close the loop from failure to fix. Zero overhead when disabled.
+
 ## Memory Configuration
 
 ```yaml
