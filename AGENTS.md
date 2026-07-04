@@ -1045,7 +1045,29 @@ Task → Attempt → Evaluate → [pass: baseline] → [fail: Analyze → Propos
 | `agent/evolution/regression_gate.py` | 5 deterministic safety gates including seesaw constraint |
 | `agent/evolution/harness_variants.py` | Variant isolation when fixes help some tasks but hurt others |
 | `agent/evolution/evolution_store.py` | SQLite persistence for runs, iterations, regression baselines |
-| `agent/evolution/auxiliary_llm.py` | Separate LLM client for analysis/proposals (default: DeepSeek) |
+| `agent/evolution/auxiliary_llm.py` | Separate LLM client for analysis/proposals (default: DeepSeek). Provides sync wrappers (`analyze_sync`, `propose_sync`, `judge_sync`) that work from any context. |
+
+### Improvement pipeline
+
+Tier 1 (deterministic) generates real SKILL.md content — not templates:
+
+- **verify-before-complete**: 5-section skill teaching the agent to verify work before declaring done
+- **workaround-{task}**: Documents alternative approaches using existing tools for missing capabilities
+- **detect-and-break-loops**: Teaches loop detection via pattern recognition + escape strategies
+- **troubleshoot-{tool}**: Tool-specific error diagnosis with common causes checklist
+- **time-efficient-{task}**: Prioritization strategies for tasks approaching turn limits
+
+All generated skills include YAML frontmatter, "When to Use", "How to Run", "Procedure", "Pitfalls", and "Verification" sections. Tier 2 (LLM via DeepSeek) generates task-specific proposals with full content.
+
+### Main API
+
+```python
+# Single-call entry point — drives the complete evolution loop
+run = manager.run_full_cycle(task, executor)
+# executor: Callable[[EvolutionRun], bool]
+# Runs execute → evaluate → analyze → propose → gate → apply → retry
+# until success or exhaustion
+```
 
 ### Safety architecture
 
@@ -1063,7 +1085,7 @@ LLMs propose; gates dispose. No LLM judgment is trusted for safety decisions.
 
 - **agent_init.py** — EvolutionManager initialized at agent startup (like MemoryManager)
 - **conversation_loop.py** — model call tracking via post_api_request hook
-- **run_agent.py** — tool call tracking in _execute_tool_calls wrapper
+- **run_agent.py** — tool call tracking in _execute_tool_calls wrapper (transport-agnostic: uses `_get_tool_call_name_static()` for OpenAI/Anthropic/dict formats)
 - **turn_finalizer.py** — session-end cleanup
 - Zero runtime overhead when `evolution.enabled: false` (default)
 

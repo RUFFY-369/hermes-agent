@@ -127,12 +127,17 @@ When a task fails, the engine uses a **two-tier analysis**:
 
 ### Tier 1: Deterministic rules (instant, always runs)
 
-The engine checks for common failure patterns:
-- **Timeout** — task exceeded time or turn limits
-- **Premature completion** — agent said "done" but criteria failed
-- **Loop detection** — agent repeated the same tool calls without progress
-- **Execution errors** — tool calls failed (permissions, missing dependencies, network)
-- **Missing tools** — agent needed a capability that doesn't exist
+The engine checks for common failure patterns AND generates real fixes:
+
+| Failure | Tier 1 Action | What's Produced |
+|---------|--------------|-----------------|
+| Premature completion | Creates `verify-before-complete` skill | 5-section SKILL.md with real verification procedures |
+| Missing tool | Creates `workaround-{task}` skill | Alternative approaches using existing tools |
+| Loop detected | Creates `detect-and-break-loops` skill | Pattern recognition + escape strategies |
+| Execution error | Creates `troubleshoot-{tool}` skill | Tool-specific diagnosis with common causes |
+| Timeout | Creates `time-efficient-{task}` skill | Prioritization + budget management strategies |
+
+Every generated skill includes: YAML frontmatter, "When to Use", "How to Run", "Procedure", "Pitfalls", and "Verification" sections. These are **real, functional skills** — not placeholder templates.
 
 ### Tier 2: LLM deep analysis (configurable, uses auxiliary model)
 
@@ -253,9 +258,14 @@ agent/evolution/
 ├── regression_gate.py       # 5 deterministic safety gates
 ├── harness_variants.py      # Variant isolation for conflicting fixes
 ├── evolution_store.py       # SQLite persistence for history + baselines
-├── auxiliary_llm.py         # Separate LLM client for analysis/proposals
-├── evolution_hooks.py       # Lifecycle hooks (pre/post LLM, tool calls)
+├── auxiliary_llm.py         # LLM client with sync wrappers (analyze_sync, propose_sync, judge_sync)
+├── evolution_hooks.py       # Lifecycle hooks — transport-agnostic (OpenAI/Anthropic/dict)
 └── evolution_tools.py       # Model-facing tools (define_task, status, etc.)
+
+# Main API entry point — drives the full evolution loop:
+run = manager.run_full_cycle(task, executor)
+# executor executes the agent and populates the trajectory
+# Engine handles: evaluate → analyze → propose → gate → apply → retry
 ```
 
 **Zero overhead when disabled.** The hooks are no-ops when `evolution.enabled: false`.
