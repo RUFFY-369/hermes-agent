@@ -75,6 +75,18 @@ class EvolutionLLMClient:
         """Generate improvement proposals. Returns JSON string response."""
         return await self._call(prompt, "improvement proposal")
 
+    def analyze_sync(self, prompt: str) -> str:
+        """Synchronous wrapper for analyze — safe to call from any context."""
+        return _run_async(self.analyze(prompt))
+
+    def propose_sync(self, prompt: str) -> str:
+        """Synchronous wrapper for propose — safe to call from any context."""
+        return _run_async(self.propose(prompt))
+
+    def judge_sync(self, rubric: str, trajectory_json: str) -> Dict[str, Any]:
+        """Synchronous wrapper for judge — safe to call from any context."""
+        return _run_async(self.judge(rubric, trajectory_json))
+
     async def judge(self, rubric: str, trajectory_json: str) -> Dict[str, Any]:
         """LLM-as-judge for qualitative evaluation criteria."""
         prompt = f"""You are an evaluation judge for an AI agent. Score the agent's performance against the rubric below.
@@ -132,6 +144,25 @@ Respond with ONLY valid JSON:
                     time.sleep(1.0 * (attempt + 1))  # Linear backoff
 
         raise RuntimeError(f"Evolution LLM call failed after {MAX_RETRIES + 1} attempts: {last_error}")
+
+
+# ---------------------------------------------------------------------------
+# Async helper — handles both running and non-running event loops
+# ---------------------------------------------------------------------------
+
+
+def _run_async(coro):
+    """Run a coroutine safely regardless of the current event loop state."""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    if loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result(timeout=60)
+    return loop.run_until_complete(coro)
 
 
 # ---------------------------------------------------------------------------

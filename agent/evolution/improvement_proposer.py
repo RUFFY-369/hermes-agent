@@ -177,62 +177,85 @@ class ImprovementProposer:
         existing_skills: Optional[List[str]] = None,
         existing_tools: Optional[List[str]] = None,
     ) -> List[ImprovementProposal]:
-        """Generate proposals from deterministic rules."""
+        """Generate proposals from deterministic rules with REAL content."""
         proposals: List[ImprovementProposal] = []
         existing_skills = existing_skills or []
         existing_tools = existing_tools or []
 
         for finding in analysis.findings:
             if finding.category == FailureCategory.MISSING_TOOL:
-                # Propose a skill that documents workarounds for missing tools
-                proposals.append(ImprovementProposal(
-                    action_type=ImprovementActionType.SKILL_CREATE,
-                    target=f"workaround-{analysis.task_name}",
-                    description=f"Skill documenting workarounds for missing tool capability in '{analysis.task_name}'",
-                    rationale=f"Agent needed a capability that doesn't exist: {finding.description}",
-                    failure_categories_addressed=[finding.category.value],
-                    confidence=0.5,
-                    requires_approval=False,
-                    rollback_instructions="Delete the skill directory",
-                ))
+                tool_desc = finding.description[:200]
+                skill_name = f"workaround-{analysis.task_name}"[:64]
+                if skill_name not in existing_skills:
+                    proposals.append(ImprovementProposal(
+                        action_type=ImprovementActionType.SKILL_CREATE,
+                        target=skill_name,
+                        description=f"Workarounds for: {tool_desc}"[:60],
+                        rationale=f"Agent needed capability that doesn't exist: {finding.description}",
+                        content=_generate_workaround_skill(analysis.task_name, finding),
+                        failure_categories_addressed=[finding.category.value],
+                        confidence=0.5,
+                        requires_approval=False,
+                        rollback_instructions=f"Delete ~/.hermes/skills/{skill_name}/",
+                    ))
 
             elif finding.category == FailureCategory.PREMATURE_COMPLETION:
-                # Propose a prompt modification to enforce verification
+                skill_name = "verify-before-complete"
                 proposals.append(ImprovementProposal(
-                    action_type=ImprovementActionType.PROMPT_MODIFY,
-                    target="verification_guidance",
-                    description="Strengthen verification requirements in agent prompts",
-                    rationale="Agent declared success without verifying. Need explicit verification step.",
+                    action_type=ImprovementActionType.SKILL_CREATE,
+                    target=skill_name,
+                    description="Verify task completion before declaring done",
+                    rationale="Agent declared success without verification. Need explicit verification step.",
+                    content=_generate_verification_skill(analysis.task_name, analysis.failed_checks),
                     failure_categories_addressed=[finding.category.value],
                     confidence=0.7,
-                    is_destructive=False,
-                    requires_approval=True,
-                    rollback_instructions="Revert prompt changes",
+                    requires_approval=False,
+                    rollback_instructions=f"Delete ~/.hermes/skills/{skill_name}/",
                 ))
 
             elif finding.category == FailureCategory.LOOP:
+                implicated = finding.implicated_tools or ["unknown"]
+                skill_name = "detect-and-break-loops"
                 proposals.append(ImprovementProposal(
-                    action_type=ImprovementActionType.PROMPT_MODIFY,
-                    target="loop_detection_guidance",
-                    description="Add loop-detection guidance to agent prompts",
-                    rationale=f"Agent got stuck in loop: {finding.description}",
+                    action_type=ImprovementActionType.SKILL_CREATE,
+                    target=skill_name,
+                    description="Detect and break repetitive tool-call loops",
+                    rationale=f"Agent stuck in loop with tools: {', '.join(implicated)}",
+                    content=_generate_loop_detection_skill(implicated, finding),
                     failure_categories_addressed=[finding.category.value],
                     confidence=0.65,
-                    is_destructive=False,
-                    requires_approval=True,
-                    rollback_instructions="Revert prompt changes",
+                    requires_approval=False,
+                    rollback_instructions=f"Delete ~/.hermes/skills/{skill_name}/",
                 ))
 
             elif finding.category == FailureCategory.EXECUTION_ERROR:
+                tool = finding.implicated_tools[0] if finding.implicated_tools else "terminal"
+                skill_name = f"troubleshoot-{tool}"[:64]
+                if skill_name not in existing_skills:
+                    proposals.append(ImprovementProposal(
+                        action_type=ImprovementActionType.SKILL_CREATE,
+                        target=skill_name,
+                        description=f"Troubleshoot common {tool} errors",
+                        rationale=f"Tool execution errors with {tool}: {finding.description[:100]}",
+                        content=_generate_troubleshooting_skill(tool, finding),
+                        failure_categories_addressed=[finding.category.value],
+                        confidence=0.55,
+                        requires_approval=False,
+                        rollback_instructions=f"Delete ~/.hermes/skills/{skill_name}/",
+                    ))
+
+            elif finding.category == FailureCategory.TIMEOUT:
+                skill_name = f"time-efficient-{analysis.task_name}"[:64]
                 proposals.append(ImprovementProposal(
                     action_type=ImprovementActionType.SKILL_CREATE,
-                    target=f"troubleshoot-{finding.implicated_tools[0] if finding.implicated_tools else 'tools'}",
-                    description=f"Troubleshooting guide for common {finding.implicated_tools[0] if finding.implicated_tools else 'tool'} errors",
-                    rationale=f"Tool execution errors: {finding.description}",
+                    target=skill_name,
+                    description=f"Time-efficient approach for {analysis.task_name}",
+                    rationale=f"Task timed out — need more efficient strategy: {finding.description}",
+                    content=_generate_time_efficient_skill(analysis.task_name, finding),
                     failure_categories_addressed=[finding.category.value],
-                    confidence=0.55,
+                    confidence=0.6,
                     requires_approval=False,
-                    rollback_instructions="Delete the skill directory",
+                    rollback_instructions=f"Delete ~/.hermes/skills/{skill_name}/",
                 ))
 
         return proposals
@@ -254,11 +277,17 @@ class ImprovementProposer:
 
         prompt = _build_proposal_prompt(task, analysis, existing_skills or [], existing_tools or [])
         try:
-            response = asyncio.get_event_loop().run_until_complete(
-                self._llm_propose_fn(prompt)
-            )
-        except Exception:
-            response = asyncio.run(self._llm_propose_fn(prompt))
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(asyncio.run, self._llm_propose_fn(prompt))
+                    response = future.result(timeout=60)
+            else:
+                response = loop.run_until_complete(self._llm_propose_fn(prompt))
+        except Exception as e:
+            logger.debug("LLM proposal generation skipped: %s", e)
+            return []
 
         return _parse_llm_proposals(response)
 
@@ -394,3 +423,299 @@ def _deduplicate_proposals(proposals: List[ImprovementProposal]) -> List[Improve
             seen.add(key)
             unique.append(p)
     return unique
+
+
+# ---------------------------------------------------------------------------
+# Real content generators — no templates, no placeholders
+# ---------------------------------------------------------------------------
+
+
+def _generate_verification_skill(task_name: str, failed_checks: List[Dict[str, Any]]) -> str:
+    """Generate a real SKILL.md that teaches the agent to verify its work."""
+    checks_desc = "\n".join(
+        f"  - {c.get('type', 'unknown')}: {c.get('detail', 'verification failed')[:100]}"
+        for c in failed_checks[:5]
+    )
+    return f"""---
+name: verify-before-complete
+description: Always verify task completion before declaring done.
+version: 0.1.0
+author: Hermes
+metadata:
+  hermes:
+    tags: [Verification, Quality, Safety]
+---
+
+# Verify Before Complete
+
+Prevents premature task completion. When the agent believes a task is done,
+it MUST run every verification step before declaring success.
+
+## When to Use
+
+- After applying a code fix
+- After creating or modifying files
+- After running deployment commands
+- Whenever a task has defined success criteria
+- The agent is about to say "Done" or "Fixed"
+
+## How to Run
+
+1. Identify the task's success criteria. If the task "{task_name}" was defined
+   with specific checks, those checks ARE the verification.
+2. Run every check before declaring completion:
+   - Use the `terminal` tool to execute test commands
+   - Use `read_file` to verify file contents match expectations
+   - Use `search_files` or `grep` via terminal to pattern-match outputs
+
+## Procedure
+
+1. Complete the main work (patch, write, deploy)
+2. Read any success criteria defined for this task
+3. Execute EACH criterion using the appropriate tool
+4. Record results — if ANY criterion fails, the task is NOT done
+5. Only declare completion when ALL criteria pass
+6. If any criterion fails, analyze the failure and fix it before retrying
+
+## Failed Checks That Triggered This Skill
+
+{checks_desc}
+
+## Pitfalls
+
+- Never assume a command succeeded without checking its exit code
+- Never assume a file was created without verifying it exists
+- "I applied the patch" is NOT the same as "the bug is fixed"
+- Verification must happen BEFORE declaring completion, not after
+
+## Verification
+
+Run: `test -f ~/.hermes/skills/verify-before-complete/SKILL.md && echo "skill installed"`
+"""
+
+
+def _generate_workaround_skill(task_name: str, finding: Any) -> str:
+    """Generate a real SKILL.md documenting workarounds for missing tools."""
+    return f"""---
+name: workaround-{task_name[:48]}
+description: Workarounds for missing capabilities in {task_name}.
+version: 0.1.0
+author: Hermes
+metadata:
+  hermes:
+    tags: [Workaround, Troubleshooting]
+---
+
+# Workarounds for {task_name}
+
+When the agent lacks a specific tool or capability, this skill documents
+alternative approaches using existing tools.
+
+## Problem
+
+{finding.description}
+
+## When to Use
+
+- The agent needs a capability that has no corresponding tool
+- A command is not available in the current environment
+- An API or service is inaccessible
+
+## How to Run
+
+1. Identify the missing capability precisely
+2. Check if any existing tool can achieve the same result:
+   - `terminal` tool for shell commands, package installs, and scripts
+   - `write_file` to create helper scripts that fill capability gaps
+   - `web_search` to find alternative approaches
+   - `read_file` to check if the capability already exists elsewhere
+3. If no existing tool works, use `terminal` to install needed packages
+   or write a Python script via `write_file` that implements the missing capability
+4. Document the workaround in this skill for future reference
+
+## Common Workarounds
+
+- Missing CLI tool: install via package manager (`apt`, `pip`, `npm`)
+- Missing API access: use `web_search` + `web_extract` as alternative data source
+- Missing file parser: write a Python script using stdlib, invoke via `terminal`
+- Missing database client: use `terminal` with `curl` against REST APIs
+
+## Verification
+
+Run: `test -f ~/.hermes/skills/workaround-{task_name[:48]}/SKILL.md && echo "skill installed"`
+"""
+
+
+def _generate_loop_detection_skill(implicated_tools: List[str], finding: Any) -> str:
+    """Generate a real SKILL.md teaching loop detection and breaking."""
+    tools_list = ", ".join(implicated_tools[:5])
+    return f"""---
+name: detect-and-break-loops
+description: Detect and escape repetitive tool-call patterns.
+version: 0.1.0
+author: Hermes
+metadata:
+  hermes:
+    tags: [Safety, Loop-Detection, Efficiency]
+---
+
+# Detect and Break Loops
+
+When the agent calls the same tools with the same arguments repeatedly
+without making progress, it's stuck in a loop. This skill teaches how
+to detect and escape.
+
+## When to Use
+
+- The same tool is called 3+ times with similar arguments
+- Progress has stalled despite multiple attempts
+- The agent is cycling between the same few tools ({tools_list})
+- Turn count is high but no forward progress
+
+## How to Run
+
+1. After every 3 tool calls, pause and evaluate:
+   - Did the last action change anything?
+   - Am I closer to the goal than before?
+   - Have I tried this exact approach already?
+2. If stuck in a loop:
+   - STOP the current approach immediately
+   - Switch to a DIFFERENT strategy
+   - If debugging, try a completely different angle
+   - If searching, broaden or narrow the search
+   - If patching, revert and try a different fix
+
+## Procedure
+
+1. Detect: count consecutive calls to the same tool with similar arguments
+2. Acknowledge: explicitly state "I am stuck in a loop with {tools_list}"
+3. Pivot: choose a strategy you have NOT tried yet
+4. Verify: after the pivot, confirm forward progress was made
+
+## Failure Evidence
+
+{finding.description}
+
+## Pitfalls
+
+- Loops waste tokens and time — detecting early saves both
+- The same tool with DIFFERENT arguments is not necessarily a loop
+- A loop can span multiple tools (A→B→A→B pattern)
+
+## Verification
+
+Run: `test -f ~/.hermes/skills/detect-and-break-loops/SKILL.md && echo "skill installed"`
+"""
+
+
+def _generate_troubleshooting_skill(tool_name: str, finding: Any) -> str:
+    """Generate a real SKILL.md for troubleshooting tool errors."""
+    return f"""---
+name: troubleshoot-{tool_name[:48]}
+description: Diagnose and fix common {tool_name} errors.
+version: 0.1.0
+author: Hermes
+metadata:
+  hermes:
+    tags: [Troubleshooting, {tool_name}]
+---
+
+# Troubleshoot {tool_name}
+
+Common failure modes for the `{tool_name}` tool and how to resolve them.
+
+## When to Use
+
+- `{tool_name}` returns an error or non-zero exit code
+- Tool output is unexpected or empty
+- The tool appears to hang or timeout
+
+## Error Pattern
+
+{finding.description}
+
+## How to Run
+
+1. Read the exact error message — don't guess
+2. Check common causes:
+   - Permission denied: use `terminal` to check file/directory permissions
+   - Command not found: use `terminal` to install missing dependencies
+   - Network timeout: retry with `web_search` or check connectivity
+   - Invalid arguments: re-read the tool schema, verify argument types
+3. Apply the fix and retry the tool
+4. If the same error persists after 2 attempts, try a DIFFERENT approach
+
+## Procedure
+
+1. Capture the exact error message from the tool result
+2. Diagnose using the common causes checklist above
+3. Apply the most likely fix
+4. Retry the tool call
+5. If still failing, escalate: use `write_file` to create a debug script
+
+## Pitfalls
+
+- Don't retry the same failing call more than twice without changing something
+- Check file paths for typos — the most common error
+- Environment variables may differ between `terminal` and other tools
+
+## Verification
+
+Run: `test -f ~/.hermes/skills/troubleshoot-{tool_name[:48]}/SKILL.md && echo "skill installed"`
+"""
+
+
+def _generate_time_efficient_skill(task_name: str, finding: Any) -> str:
+    """Generate a real SKILL.md for time-efficient task strategies."""
+    return f"""---
+name: time-efficient-{task_name[:46]}
+description: Time-efficient approach for completing {task_name}.
+version: 0.1.0
+author: Hermes
+metadata:
+  hermes:
+    tags: [Efficiency, Time-Management]
+---
+
+# Time-Efficient {task_name}
+
+When tasks timeout, the strategy must change. This skill teaches the agent
+to complete "{task_name}" within time constraints by prioritizing the most
+impactful actions first.
+
+## When to Use
+
+- Task "{task_name}" exceeded its time or turn limit
+- Approaching the turn budget with work remaining
+- Complex task that requires many steps
+
+## Failure Evidence
+
+{finding.description}
+
+## How to Run
+
+1. Before starting, estimate the number of steps needed
+2. Prioritize: most impactful actions first, nice-to-haves last
+3. After each major action, check remaining turns/time
+4. If approaching the limit, deliver a partial result with clear notes
+   on what remains, rather than timing out with nothing
+
+## Procedure
+
+1. Read the task definition — identify the CRITICAL criteria vs optional ones
+2. Plan: allocate turns to each criterion based on complexity
+3. Execute in priority order, checking progress every 2-3 turns
+4. If time is running out, deliver what you have with a summary of gaps
+5. Next attempt: skip steps that already succeeded, focus on remaining gaps
+
+## Pitfalls
+
+- Don't spend 80% of turns on the first step — budget your turns
+- Reading files is cheap — doing it upfront prevents later rework
+- Running verification early catches problems before time runs out
+
+## Verification
+
+Run: `test -f ~/.hermes/skills/time-efficient-{task_name[:46]}/SKILL.md && echo "skill installed"`
+"""

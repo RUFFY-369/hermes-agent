@@ -522,14 +522,18 @@ class TestImprovementProposer:
         )
         proposals = proposer._rule_based_proposals(analysis)
         assert len(proposals) >= 2
-        # Should have both a skill proposal and a prompt proposal
+        # Both findings generate SKILL_CREATE proposals with real content
         types = {p.action_type for p in proposals}
         assert ImprovementActionType.SKILL_CREATE in types
-        assert ImprovementActionType.PROMPT_MODIFY in types
+        # Verify proposals have real content, not empty placeholders
+        for p in proposals:
+            assert len(p.content) > 200, f"Proposal {p.target} has no real content ({len(p.content)} bytes)"
+            assert "---" in p.content, f"Proposal {p.target} missing YAML frontmatter"
 
     def test_deduplication(self):
         proposer = ImprovementProposer()
         analysis = FailureAnalysis(
+            run_id="test", task_name="test-task",
             findings=[
                 FailureFinding(category=FailureCategory.MISSING_TOOL, confidence=0.8,
                               description="Need tool", evidence="No kubectl found",
@@ -540,6 +544,9 @@ class TestImprovementProposer:
         # Proposer should not create duplicate proposals for the same (type, target)
         targets = {(p.action_type, p.target) for p in proposals}
         assert len(targets) == len(proposals)  # All unique
+        # Proposals must have real content
+        for p in proposals:
+            assert len(p.content) > 100, f"Proposal {p.target} has empty content"
 
     def test_proposal_serialization(self):
         proposal = ImprovementProposal(

@@ -204,6 +204,8 @@ class RegressionGate:
 
     def _check_content(self, proposal: ImprovementProposal) -> Tuple[bool, str]:
         """Validate proposal content."""
+        if proposal.content is None:
+            return False, "Proposal content is None"
         if proposal.action_type == ImprovementActionType.SKILL_CREATE:
             # Check for required SKILL.md frontmatter
             if "---" not in proposal.content:

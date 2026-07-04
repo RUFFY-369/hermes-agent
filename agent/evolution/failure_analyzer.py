@@ -288,18 +288,13 @@ class FailureAnalyzer:
         if not self._llm_analyze_fn:
             return []
 
-        import asyncio
-
         prompt = _build_analysis_prompt(task, trajectory, eval_result)
         try:
-            response = asyncio.get_event_loop().run_until_complete(
-                self._llm_analyze_fn(prompt)
-            )
-        except Exception:
-            # Try running in a new event loop if the current one is closed
-            response = asyncio.run(self._llm_analyze_fn(prompt))
+            response = self._llm_analyze_fn(prompt)
+        except Exception as e:
+            logger.debug("LLM deep analysis failed: %s", e)
+            return []
 
-        # Parse JSON response
         findings = _parse_llm_analysis(response)
         return findings
 

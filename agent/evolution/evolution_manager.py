@@ -405,7 +405,11 @@ class EvolutionManager:
 
         # Step 3: Gate each proposal, apply accepted ones
         applied = 0
+        already_applied = {(p.action_type.value, p.target) for p in run.applied_proposals}
         for proposal in proposals:
+            # Skip if already applied in a previous iteration
+            if (proposal.action_type.value, proposal.target) in already_applied:
+                continue
             gate_result = self._gate.evaluate(proposal)
             self._store.add_iteration(
                 run_id=run.run_id,
@@ -526,6 +530,71 @@ class EvolutionManager:
             return True
         except Exception:
             return False
+
+    # -- Full cycle (drives the entire loop) ----------------------------------
+
+    def run_full_cycle(
+        self,
+        task: TaskDefinition,
+        executor: Callable[[EvolutionRun], bool],
+    ) -> EvolutionRun:
+        """Run the complete evolution cycle: attempt → evaluate → improve → retry.
+
+        This is the single-call entry point. It drives the full loop:
+
+        1. Start tracking the task
+        2. Call *executor* to run the agent (executor receives the run,
+           should execute the task and populate the trajectory)
+        3. Evaluate the result
+        4. If failed and iterations remain: analyze, propose, gate, apply fixes
+        5. Call *executor* again for retry
+        6. Repeat until success or exhaustion
+
+        Args:
+            task: The task definition.
+            executor: Callable that executes the agent for this task.
+                Signature: (EvolutionRun) -> bool
+                The executor should:
+                - Read run.task for the task definition
+                - Execute the agent (the run.collector tracks automatically)
+                - Call run.collector.stop() and set run.trajectory when done
+                - Return True if agent completed, False if execution failed
+
+        Returns:
+            The final EvolutionRun with complete history.
+        """
+        run = self.start_task(task)
+
+        while run.can_continue:
+            # Execute the agent
+            try:
+                executor_success = executor(run)
+                if not executor_success:
+                    run.status = TaskStatus.FAILED
+                    break
+            except Exception as e:
+                logger.error("Task executor failed: %s", e)
+                run.status = TaskStatus.FAILED
+                if run.collector and run.collector.is_active:
+                    run.collector.record_error(str(e))
+                break
+
+            # Stop collection and evaluate
+            if run.collector and run.collector.is_active:
+                run.trajectory = run.collector.stop()
+            result = self.evaluate(run)
+
+            if result.passed:
+                break
+
+            # Try to improve
+            retry_initiated = self.improve_and_retry(run)
+            if not retry_initiated:
+                break
+
+        # Finalize
+        self.end_task(run)
+        return run
 
     # -- Status / query API ---------------------------------------------------
 

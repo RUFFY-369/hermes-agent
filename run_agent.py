@@ -5612,8 +5612,7 @@ class AIAgent:
         if _evo_active:
             import time as _time
             for _tc in tool_calls:
-                _fn_name = getattr(_tc, "function", None)
-                _fn_name = _fn_name.name if hasattr(_fn_name, "name") else str(_tc)
+                _fn_name = self._get_tool_call_name_static(_tc) or str(_tc)
                 _evo_tool_start_times[_fn_name] = _time.monotonic()
 
         # Allow _vprint during tool execution even with stream consumers
@@ -5632,8 +5631,7 @@ class AIAgent:
             if _evo_active:
                 import time as _time2
                 for _tc in tool_calls:
-                    _fn_name = getattr(_tc, "function", None)
-                    _fn_name = _fn_name.name if hasattr(_fn_name, "name") else str(_tc)
+                    _fn_name = self._get_tool_call_name_static(_tc) or str(_tc)
                     _start = _evo_tool_start_times.get(_fn_name, _time2.monotonic())
                     _dur_ms = int((_time2.monotonic() - _start) * 1000)
                     try:
