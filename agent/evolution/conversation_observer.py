@@ -526,6 +526,8 @@ class ConversationObserver:
 
     def observe_turn(self, messages: List[Dict[str, Any]]) -> None:
         """Record a conversation turn for pattern discovery."""
+        if not self._current_session_id:
+            self.start_session(f"auto-{__import__('time').time()}")
         self._current_turn_count += 1
 
         for msg in messages:
