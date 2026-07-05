@@ -87,9 +87,6 @@ from agent.evolution.atropos_export import (
 )
 from agent.evolution.conversation_observer import (
     ConversationObserver,
-    ObservedPattern,
-    PatternType,
-    PATTERN_LABELS,
     get_observer,
 )
 from agent.evolution.improvement_metrics import (
@@ -157,9 +154,6 @@ __all__ = [
     "get_export_stats",
     # Conversation Observer
     "ConversationObserver",
-    "ObservedPattern",
-    "PatternType",
-    "PATTERN_LABELS",
     "get_observer",
     # Improvement Metrics
     "ImprovementTracker",
