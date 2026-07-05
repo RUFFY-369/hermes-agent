@@ -1,20 +1,14 @@
 """Auto-Trigger — HAEE activates automatically during normal agent use.
 
 Users never run `hermes evolution run`. Instead, the engine watches
-conversations, detects when a known task pattern is being executed,
-auto-evaluates the result, and silently improves the agent.
+conversations and auto-improves the agent across ALL failure types:
 
-Flow:
-  1. User chats normally: "fix the login bug"
-  2. Observer detects this matches a known task pattern (bug-fix)
-  3. After agent completes, HAEE auto-evaluates against inferred criteria
-  4. If agent failed (didn't verify, forgot docs, etc.), HAEE:
-     a. Analyzes the failure
-     b. Generates a fix (skill/prompt)
-     c. Gates it for safety
-     d. Applies it silently OR nudges user: "I noticed I forgot to verify.
-        I've created a skill to prevent this. Review?"
-  5. Next time user asks for a similar fix, agent uses the skill
+  1. Missing verification — agent didn't test/verify work
+  2. Loop detection — agent repeated the same tools 3+ times
+  3. Execution errors — tools failed (permission, missing deps, network)
+  4. Premature completion — agent declared done, user corrected
+  5. Missing output — agent said done but no files were created
+  6. User correction — strongest signal, triggers immediate improvement
 
 Nudge levels:
   - silent:  Apply fixes automatically (safe ones only: skill_create, skill_patch)
@@ -67,12 +61,40 @@ class AutoTrigger:
         self._store = get_evolution_store()
         self._nudge_callback: Optional[Callable] = None  # Set by agent init
 
-    def apply_verification_skill(self, task_name: str) -> Optional[str]:
-        """Auto-create a verification skill for a task cluster. Returns nudge message."""
-        from agent.evolution.improvement_proposer import _generate_verification_skill
+    def apply_fix(self, task_name: str, failure_type: str) -> Optional[str]:
+        """Auto-create an improvement skill for any failure type."""
+        from agent.evolution.improvement_proposer import (
+            _generate_verification_skill,
+            _generate_loop_detection_skill,
+            _generate_troubleshooting_skill,
+        )
+        from agent.evolution.failure_analyzer import FailureFinding, FailureCategory
 
-        skill_name = "verify-before-complete"
-        content = _generate_verification_skill(task_name, [])
+        # Map failure type to skill generator
+        if failure_type in ("missing_verification", "silent_session", "missing_output"):
+            content = _generate_verification_skill(task_name, [])
+            skill_name = "verify-before-complete"
+            msg = f"I forgot to verify my work on '{task_name}'"
+        elif failure_type == "loop_detected":
+            content = _generate_loop_detection_skill(
+                ["terminal", "read_file"],
+                FailureFinding(category=FailureCategory.LOOP, confidence=0.8,
+                              description="Agent repeated the same tools without progress",
+                              evidence="3+ consecutive identical tool calls"),
+            )
+            skill_name = "detect-and-break-loops"
+            msg = f"I got stuck in a loop while working on '{task_name}'"
+        elif failure_type == "user_correction":
+            content = _generate_troubleshooting_skill(
+                "terminal",
+                FailureFinding(category=FailureCategory.PREMATURE_COMPLETION, confidence=0.9,
+                              description="User had to correct the agent's output",
+                              evidence="User said the output was wrong"),
+            )
+            skill_name = f"troubleshoot-{task_name[:48]}"
+            msg = f"I made a mistake on '{task_name}' and you corrected me"
+        else:
+            return None
 
         if not content:
             return None
@@ -86,10 +108,20 @@ class AutoTrigger:
         if self.nudge_level == SILENT:
             return None
         return (
-            f"🔧 HAEE noticed I forgot to verify my work on '{task_name}'.\n"
+            f"🔧 HAEE: {msg}.\n"
             f"   Auto-created '{skill_name}' skill to prevent this.\n"
-            f"   I'll verify automatically next time."
+            f"   I'll handle this correctly next time."
         )
+
+    def _run_improvement_for_failure(
+        self, task, cluster, failure_type, session_id
+    ) -> Optional[str]:
+        """Run improvement cycle for any failure type."""
+        return self.apply_fix(task.name, failure_type)
+
+    def apply_verification_skill(self, task_name: str) -> Optional[str]:
+        """Backward-compatible wrapper."""
+        return self.apply_fix(task_name, "missing_verification")
 
     def set_nudge_callback(self, callback: Callable[[str, str], None]) -> None:
         """Set a callback for user nudges. Called as callback(title, message)."""
@@ -128,15 +160,13 @@ class AutoTrigger:
         # Build an ad-hoc task from the cluster's criteria
         task = self._cluster_to_task(best_cluster)
 
-        # Check if the agent followed the cluster's pattern
-        # Key insight: we don't need to run the full evaluator.
-        # We check: did the agent verify its work?
+        # Check for ALL failure types
         observer = get_observer()
-        verification_failed = self._detect_missing_verification(
+        should_trigger, failure_type = self._detect_failures(
             best_cluster, observer
         )
 
-        if not verification_failed:
+        if not should_trigger:
             # Record success baseline
             self._store.set_baseline(
                 task_name=best_cluster.task_name,
@@ -145,39 +175,54 @@ class AutoTrigger:
             )
             return None
 
-        # Verification missing — run the improvement cycle
-        return self._run_improvement_cycle(task, None, best_cluster, session_id)
+        # Run improvement cycle with the specific failure type
+        return self._run_improvement_for_failure(
+            task, best_cluster, failure_type, session_id
+        )
 
     @staticmethod
-    def _detect_missing_verification(cluster, observer) -> bool:
-        """Check if the current session missed verification that the cluster expects.
+    def _detect_failures(cluster, observer) -> Tuple[bool, str]:
+        """Detect ALL failure types in the current session.
 
-        Returns True if verification was missing (trigger improvement).
+        Returns (should_trigger, failure_type).
         """
-        # Get the current session's tool sequence from the observer
         if not observer._current_tool_sequence:
-            return False
+            return False, ""
 
         tools = observer._current_tool_sequence
+        user_msgs = observer._current_user_messages
 
-        # Check if any verification tool was called
-        verify_tools = {"terminal", "read_file", "search_files"}
-        had_verification = any(t in verify_tools for t in tools)
+        # 1. User correction — strongest signal, always triggers
+        for msg in user_msgs:
+            msg_lower = msg.lower()
+            for signal in ["no", "wrong", "incorrect", "doesn't work", "not working",
+                          "try again", "redo", "forgot", "missing", "incomplete",
+                          "actually", "instead", "should be", "need to also"]:
+                if signal in msg_lower:
+                    return True, "user_correction"
 
-        # Check if write/patch tools were used (agent did work)
-        work_tools = {"write_file", "patch"}
+        # 2. Missing verification: agent did work but didn't verify
+        work_tools = {"write_file", "patch", "execute_code"}
+        verify_tools = {"terminal", "read_file", "search_files", "browser_snapshot"}
         did_work = any(t in work_tools for t in tools)
-
-        # Trigger: agent did work but didn't verify
+        had_verification = any(t in verify_tools for t in tools)
         if did_work and not had_verification:
-            return True
+            return True, "missing_verification"
 
-        # Also trigger if cluster has high confidence but this session had no user feedback
-        if cluster.confidence >= 0.5:
-            if not observer._current_user_messages:
-                return True  # No user feedback = potential silent failure
+        # 3. Loop detection: same tool called 3+ times consecutively
+        for i in range(len(tools) - 2):
+            if tools[i] == tools[i+1] == tools[i+2]:
+                return True, "loop_detected"
 
-        return False
+        # 4. Missing output: agent declared done but no files were created
+        if did_work and not observer._current_files:
+            return True, "missing_output"
+
+        # 5. Silent session: no user feedback at all on high-confidence cluster
+        if cluster.confidence >= 0.6 and not user_msgs:
+            return True, "silent_session"
+
+        return False, ""
 
     @staticmethod
     def _agent_just_completed(messages: List[Dict[str, Any]]) -> bool:

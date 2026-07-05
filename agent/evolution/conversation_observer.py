@@ -443,33 +443,52 @@ class ConversationObserver:
         return self._auto_trigger_if_needed(fp)
 
     def _auto_trigger_if_needed(self, fp: SessionFingerprint) -> Optional[str]:
-        """If this session lacked verification for a known cluster, auto-improve."""
-        if fp.has_verification:
-            return None  # All good
+        """If this session had any detectable failure, auto-improve."""
         if not fp.tool_ngrams:
             return None
 
-        # Find the best-matching cluster
-        best = None
-        best_sim = 0.0
-        for cluster in self._clusters.values():
-            if not cluster.fingerprints:
-                continue
-            sim = self._jaccard_similarity(fp, cluster.fingerprints[-1])
-            if sim > best_sim and sim >= 0.15:  # Lower threshold for auto-trigger
-                best_sim = sim
-                best = cluster
-
-        if not best or best.occurrence_count < 3:
-            return None
-
-        # Create the improvement skill
         try:
             from agent.evolution.auto_trigger import AutoTrigger
             trigger = AutoTrigger()
-            return trigger.apply_verification_skill(best.task_name)
+
+            # Check for obvious failures first (no cluster needed)
+            # — user corrections and loops are always worth fixing
+            if self._current_user_messages:
+                for msg in self._current_user_messages:
+                    for signal in ["no", "wrong", "incorrect", "doesn't work", "forgot", "missing"]:
+                        if signal in msg.lower():
+                            return trigger.apply_fix("user-task", "user_correction")
+
+            # Loop detection: 3+ same tool = obvious failure
+            tools = self._current_tool_sequence
+            for i in range(len(tools) - 2):
+                if tools[i] == tools[i+1] == tools[i+2]:
+                    return trigger.apply_fix("repetitive-task", "loop_detected")
+
+            # Missing output: did work, no files
+            work_tools = {"write_file", "patch", "execute_code"}
+            if any(t in work_tools for t in tools) and not self._current_files:
+                return trigger.apply_fix("output-task", "missing_output")
+
+            # Find matching cluster for cluster-based failures
+            best = None
+            best_sim = 0.0
+            for cluster in self._clusters.values():
+                if not cluster.fingerprints:
+                    continue
+                sim = self._jaccard_similarity(fp, cluster.fingerprints[-1])
+                if sim > best_sim and sim >= 0.15:
+                    best_sim = sim
+                    best = cluster
+
+            if best and best.occurrence_count >= 3:
+                should_trigger, failure_type = trigger._detect_failures(best, self)
+                if should_trigger:
+                    return trigger.apply_fix(best.task_name, failure_type)
         except Exception:
-            return None
+            pass
+
+        return None
 
     def observe_turn(self, messages: List[Dict[str, Any]]) -> None:
         """Record a conversation turn for pattern discovery."""
