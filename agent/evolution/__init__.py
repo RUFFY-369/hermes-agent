@@ -92,6 +92,13 @@ from agent.evolution.conversation_observer import (
     PATTERN_LABELS,
     get_observer,
 )
+from agent.evolution.improvement_metrics import (
+    ImprovementTracker,
+    ImprovementRecord,
+    LearnedFailurePredictor,
+    TrajectoryFeatures,
+    get_tracker,
+)
 
 __all__ = [
     # Config
@@ -154,4 +161,10 @@ __all__ = [
     "PatternType",
     "PATTERN_LABELS",
     "get_observer",
+    # Improvement Metrics
+    "ImprovementTracker",
+    "ImprovementRecord",
+    "LearnedFailurePredictor",
+    "TrajectoryFeatures",
+    "get_tracker",
 ]

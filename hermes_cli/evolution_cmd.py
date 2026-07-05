@@ -513,6 +513,49 @@ def _cmd_suggest_tasks(args) -> int:
     return 0
 
 
+# ── improvement ────────────────────────────────────────────────────────
+
+
+def _cmd_improvement(args) -> int:
+    """Show statistical proof of agent improvement over time."""
+    try:
+        from agent.evolution.improvement_metrics import get_tracker
+    except Exception as e:
+        print(f"Error loading metrics module: {e}")
+        return 1
+
+    tracker = get_tracker()
+    report = tracker.generate_report()
+    s = report["summary"]
+
+    print("Agent Improvement Report")
+    print("=" * 50)
+    print(f"  Records:            {s['total_records']}")
+    print(f"  Unique tasks:       {s['unique_tasks']}")
+    print(f"  Mean improvement:   {s['mean_improvement']:+.3f}")
+    print(f"  Median improvement: {s['median_improvement']:+.3f}")
+    print(f"  Improvement rate:   {s['improvement_rate']:.0%}")
+    print(f"  Effect size:        {s['effect_size']:.3f} ({s['effect_size_label']})")
+    print(f"  Wilcoxon p-value:   {s['wilcoxon_p_value']:.4f}")
+    print(f"  Significant (p<.05): {'✅ YES' if s['statistically_significant'] else '❌ not yet'}")
+    print()
+
+    if report["tasks_improving"]:
+        print(f"  Tasks improving: {len(report['tasks_improving'])}")
+        for name in report["tasks_improving"][:10]:
+            td = report["task_details"].get(name, {})
+            if td:
+                print(f"    {name}: {td.get('first_half_mean', 0):.2f} → {td.get('second_half_mean', 0):.2f} ({td.get('improvement', 0):+.2f})")
+
+    if s["total_records"] < 5:
+        print(f"\n  Need {5 - s['total_records']} more improvements for statistical testing.")
+    elif s["statistically_significant"]:
+        print(f"\n  ✅ HAEE produces statistically significant improvement (p={s['wilcoxon_p_value']:.3f})")
+        print(f"  Effect size: {s['effect_size_label']} (d={s['effect_size']:.2f})")
+
+    return 0
+
+
 # ── Parser setup ────────────────────────────────────────────────────────
 
 
@@ -586,3 +629,7 @@ def register_parser(subparsers: argparse._SubParsersAction) -> None:
     p_suggest.add_argument("--save", action="store_true", help="Auto-save suggested tasks to task bank")
     p_suggest.add_argument("--verbose", "-v", action="store_true", help="Show full task YAML")
     p_suggest.set_defaults(func=_cmd_suggest_tasks)
+
+    # improvement
+    p_improve = evo_subs.add_parser("improvement", help="Show statistical proof of agent improvement over time")
+    p_improve.set_defaults(func=_cmd_improvement)

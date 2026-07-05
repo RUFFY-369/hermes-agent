@@ -352,6 +352,26 @@ class EvolutionManager:
             if self._variants:
                 variant = self._variants.active_variant
                 variant.record_result(run.task.name, result.score, True)
+
+            # Track improvement if this was a retry (iteration > 0)
+            if run.iteration > 0:
+                try:
+                    from agent.evolution.improvement_metrics import get_tracker
+                    prev_score = 0.0
+                    prev_iterations = self._store.get_iterations(run.run_id)
+                    for it in prev_iterations:
+                        if it.get("score") is not None:
+                            prev_score = it["score"]
+                            break
+                    get_tracker().record_improvement(
+                        task_name=run.task.name,
+                        score_before=prev_score,
+                        score_after=result.score,
+                        run_id=run.run_id,
+                    )
+                except Exception:
+                    pass
+
             logger.info("Task '%s' SUCCEEDED (score=%.2f, run=%s)", run.task.name, result.score, run.run_id)
         else:
             run.status = TaskStatus.FAILED
