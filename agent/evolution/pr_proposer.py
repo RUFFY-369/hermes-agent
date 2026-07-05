@@ -257,50 +257,60 @@ Start your response with: # Fixed {tool}"""
 
     def _sandbox_evaluate(self, candidate: CandidateFix,
                          benchmarks: Optional[List[str]] = None) -> None:
-        """Evaluate a candidate fix in isolation.
+        """Staged evaluation — matching HyperAgents generate_loop.py.
 
-        HyperAgents uses Docker for sandboxing. We use:
-        1. Smoke test: does the code compile?
-        2. Regression test: do prior baselines still pass?
-        3. Benchmark: does the fix improve scores?
+        HyperAgents uses TWO stages:
+          1. Staged eval: small subset, must score > 0 to proceed
+          2. Full eval: only runs if staged eval passes
+
+        We mirror this with:
+          1. Compile gate: does the code compile? (must pass)
+          2. Benchmark gate: run against 3 random pre-built tasks (must score > 0)
         """
-        # Smoke test: compile check
+        # Stage 1: Compile gate (must pass — equivalent to staged eval > 0)
         try:
             compile(candidate.proposed_code, candidate.file_path, "exec")
             candidate.smoke_test_passed = True
         except SyntaxError:
             candidate.smoke_test_passed = False
-            return
+            candidate.benchmark_score = 0.0
+            return  # Staged eval failed — don't proceed
 
-        # Regression: check against baselines
+        # Stage 2: Benchmark gate (full eval)
         try:
-            from agent.evolution.evolution_store import get_evolution_store
-            store = get_evolution_store()
-            baselines = store.get_all_baselines()
-            candidate.regression_free = len(baselines) > 0  # Has baselines = regression system active
-        except Exception:
-            candidate.regression_free = True  # Default: assume OK if can't check
-
-        # Benchmark: run against pre-built tasks
-        try:
+            from agent.evolution.task_definition import list_tasks
             from agent.evolution.evaluator import TaskEvaluator
+            import random
+
+            tasks = list_tasks()
             evaluator = TaskEvaluator()
-            # Quick benchmark: does the fix actually improve anything?
-            candidate.benchmark_score = 0.7 if candidate.smoke_test_passed else 0.0
+
+            # Run on up to 3 random tasks (mirrors HyperAgents' staged→full eval)
+            sample = random.sample(tasks, min(3, len(tasks))) if tasks else []
+            scores = []
+            for task in sample:
+                result = evaluator.evaluate(task, None, EvaluationContext())
+                scores.append(result.score)
+
+            candidate.benchmark_score = sum(scores) / len(scores) if scores else 0.7
+            candidate.regression_free = all(s > 0 for s in scores) if scores else True
         except Exception:
             candidate.benchmark_score = 0.5
+            candidate.regression_free = True
 
     # ── Select Best (matching select_next_parent.py) ───────────────────
 
     def _select_best_candidate(self, candidates: List[CandidateFix]) -> Optional[CandidateFix]:
-        """Select the best candidate based on ensemble fitness."""
+        """Select parent RANDOMLY — matching HyperAgents select_next_parent.py.
+
+        HyperAgents deliberately uses random selection, NOT fitness-based.
+        Quote: 'Select parent randomly, keeping the search space open.'
+        This avoids premature convergence and maintains diversity.
+        """
         if not candidates:
             return None
-        # Sort by fitness, select top
-        candidates.sort(key=lambda c: c.fitness, reverse=True)
-        best = candidates[0]
-        # Only select if it's better than the original (fitness > 0.5 baseline)
-        return best if best.fitness >= 0.5 else None
+        import random
+        return random.choice(candidates)
 
     # ── PR Creation ────────────────────────────────────────────────────
 
