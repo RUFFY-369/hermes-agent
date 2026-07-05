@@ -53,6 +53,16 @@ class AutoTrigger:
     """
 
     def __init__(self, nudge_level: str = NOTIFY):
+        # Read from config if available, otherwise default
+        try:
+            from hermes_cli.config import load_config
+            cfg = load_config()
+            evo = cfg.get("evolution", {}) if isinstance(cfg, dict) else {}
+            level = evo.get("nudge_level", "").strip().lower()
+            if level in (SILENT, NOTIFY, APPROVE, OFF):
+                nudge_level = level
+        except Exception:
+            pass
         self.nudge_level = nudge_level
         self._evaluator = TaskEvaluator()
         self._analyzer = FailureAnalyzer()
