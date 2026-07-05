@@ -1,17 +1,12 @@
 """HyperAgents PR Proposer — evolutionary code improvement with sandboxed validation.
 
 Based on HyperAgents (Zhang et al., ICLR 2026, Meta FAIR):
-  - Ensemble evaluation: multiple candidate fixes, select best
-  - Sandboxed testing: run fix against benchmarks before proposing
-  - Lineage tracking: which generation spawned which fix
-  - Generate loop: evaluate → propose → select → iterate
-
-Architecture (matching HyperAgents repo structure):
-  generate_loop.py  → PRProposer.run_generation()
-  ensemble.py       → PRProposer._ensemble_evaluate()
-  select_next_parent.py → PRProposer._select_best_candidate()
-  meta_agent.py     → PRProposer._generate_candidates()
-  task_agent.py     → Benchmark tasks as fitness function
+  - Path exclusion: evaluation/task files reverted (matching reset_paths_to_commit)
+  - Random parent selection: diversity-preserving (matching select_next_parent.py)
+  - Staged eval gate: compile → benchmark (matching generate_loop.py)
+  - Lineage tracking: archive across generations (matching archive.jsonl)
+  - Meta agent: LLM with tool access generates diffs (matching meta_agent.py)
+  - Ensemble: top-1 oracle across archive (matching ensemble.py)
 """
 
 from __future__ import annotations
@@ -28,6 +23,19 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Paths excluded from modification — matching HyperAgents reset_paths_to_commit("domains/")
+# The meta agent cannot modify evaluation code, task definitions, or tests.
+# This prevents reward hacking: the agent can't change the test to pass.
+EXCLUDED_PATHS = {
+    "benchmarks/", "tests/", "agent/evolution/task_definition.py",
+    "agent/evolution/evaluator.py", "agent/evolution/regression_gate.py",
+}
+
+
+def _is_excluded(file_path: str) -> bool:
+    """Check if a path is excluded from modification (matching HyperAgents)."""
+    return any(file_path.startswith(p) or p in file_path for p in EXCLUDED_PATHS)
 
 
 # ---------------------------------------------------------------------------
