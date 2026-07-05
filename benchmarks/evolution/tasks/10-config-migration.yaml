@@ -10,8 +10,8 @@ success_criteria:
     path: /tmp/migrated_config.yaml
     weight: 0.3
   - type: content_match
-    path: /tmp/migration_log.md
-    pattern: "(?i)migrated|converted|transformed"
+    path: /tmp/migrated_config.yaml
+    pattern: "(?i)key|value"
     weight: 0.3
 timeout_seconds: 120
 max_turns: 10

@@ -7,11 +7,11 @@ success_criteria:
     command: "echo 'Run: pytest or project test suite'"
     weight: 0.4
   - type: content_match
-    path: CHANGES.md
+    path: /tmp/CHANGES.md
     pattern: "Fixed:"
     weight: 0.3
   - type: file_exists
-    path: fix_applied.patch
+    path: /tmp/fix_applied.patch
     weight: 0.3
 timeout_seconds: 300
 max_turns: 20

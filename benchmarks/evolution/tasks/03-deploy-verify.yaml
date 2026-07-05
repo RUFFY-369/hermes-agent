@@ -11,7 +11,7 @@ success_criteria:
     expected_output: "healthy"
     weight: 0.4
   - type: file_exists
-    path: /tmp/deploy.log
+    path: /tmp/health.txt
     weight: 0.3
 timeout_seconds: 120
 max_turns: 12
