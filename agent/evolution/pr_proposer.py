@@ -212,34 +212,141 @@ class PRProposer:
 
     def _llm_generate_fix(self, tool: str, original: str, finding: Dict,
                          lineage: EvolutionLineage) -> Optional[str]:
-        """Use LLM to generate a code fix — matches meta_agent.py forward()."""
+        """Use LLM to generate a code fix — matching meta_agent.py forward().
+
+        Includes FULL chat history of prior attempts — this is the key
+        HyperAgents insight: the meta-agent sees what was tried before
+        and learns from failures.
+        """
         try:
             from agent.evolution.auxiliary_llm import get_evolution_llm
             llm = get_evolution_llm()
             if not llm or not llm.is_available:
                 return None
 
-            # Build meta-agent prompt: "Modify any part of the codebase"
-            prompt = f"""You are a meta-agent. Your task is to modify the agent's source code to fix a failure.
+            # Build chat history from prior generations
+            history = self._build_chat_history(lineage)
 
-FAILURE: {finding.get('category', 'unknown')}
+            # Cross-cluster: check if similar failures were fixed elsewhere
+            related_fixes = self._find_related_fixes(finding)
+
+            prompt = f"""You are a meta-agent improving an AI agent's source code.
+
+## Chat History (Prior Attempts)
+{history}
+
+## Cross-Cluster Knowledge
+{related_fixes}
+
+## Current Failure
+CATEGORY: {finding.get('category', 'unknown')}
 DESCRIPTION: {finding.get('description', '')}
 EVIDENCE: {finding.get('evidence', '')}
-GENERATION: {len(lineage.generations) + 1}
-PREVIOUS ATTEMPTS: {len(lineage.generations)} prior fixes tried ({'resolved' if lineage.resolved else 'unresolved'})
 
-ORIGINAL CODE ({tool}):
+## Evolution State
+GENERATION: {len(lineage.generations) + 1}
+OCCURRENCES: {lineage.occurrences}
+RESOLVED: {lineage.resolved}
+IMPROVEMENT DELTA: {lineage.improvement_delta:+.3f}
+
+## Source Code ({tool})
 ```python
 {original[:3000]}
 ```
 
-Modify any part of this code to fix the failure. Return the COMPLETE corrected file.
-Your response must be ONLY the corrected Python code, no markdown, no explanation.
-Start your response with: # Fixed {tool}"""
+Based on the chat history (what failed before), cross-cluster knowledge
+(what worked for similar failures), and the current code, modify the
+source to fix the failure. Return the COMPLETE corrected file.
+Start with: # Fixed {tool}"""
             return llm.analyze_sync(prompt)
         except Exception as e:
             logger.debug("LLM fix generation failed: %s", e)
             return None
+
+    def _build_chat_history(self, lineage: EvolutionLineage) -> str:
+        """Build meta-agent chat history from prior generations.
+
+        Matching HyperAgents: the meta-agent's chat_history_file accumulates
+        across generations so the LLM sees what was tried and what failed.
+        """
+        if not lineage.generations:
+            return "(No prior attempts — this is generation 1)"
+
+        lines = []
+        for i, gen_id in enumerate(lineage.generations, 1):
+            # Find the candidate
+            candidate = None
+            for c in self._candidates:
+                if c.id == gen_id:
+                    candidate = c
+                    break
+
+            if candidate:
+                outcome = "✅ MERGED" if lineage.merged_fix_id == gen_id else (
+                    "❌ FAILED" if not candidate.smoke_test_passed else
+                    "⚠ PARTIAL" if not candidate.regression_free else
+                    "⏳ UNTESTED"
+                )
+                lines.append(
+                    f"Gen {i} ({gen_id}): {outcome} | "
+                    f"benchmark={candidate.benchmark_score:.2f} | "
+                    f"smoke={'pass' if candidate.smoke_test_passed else 'FAIL'} | "
+                    f"regression={'clean' if candidate.regression_free else 'issues'}"
+                )
+            else:
+                lines.append(f"Gen {i} ({gen_id}): outcome unknown")
+
+        if lineage.resolved:
+            lines.append(f"RESOLVED in generation {len(lineage.generations)}")
+        else:
+            lines.append(f"UNRESOLVED after {len(lineage.generations)} generations — try a different approach")
+
+        return "\n".join(lines)
+
+    def _find_related_fixes(self, finding: Dict) -> str:
+        """Cross-cluster transfer: find fixes for similar failures.
+
+        Matching HyperAgents multi-domain eval: improvements in one domain
+        transfer to others. We check if similar failure types were fixed
+        in other clusters.
+        """
+        category = finding.get("category", "")
+        related = []
+
+        for fid, lin in self._lineages.items():
+            if lin.failure_type == category and lin.resolved and lin.merged_fix_id:
+                related.append(
+                    f"- {category} in cluster {fid}: "
+                    f"resolved in gen {len(lin.generations)} "
+                    f"(Δ={lin.improvement_delta:+.3f})"
+                )
+
+        if related:
+            return "Similar failures fixed elsewhere:\n" + "\n".join(related[:5])
+        return "(No related fixes found — this is a novel failure pattern)"
+
+    def ensemble_predict(self, failure_type: str, candidates: List[CandidateFix]
+                        ) -> Optional[CandidateFix]:
+        """Archive ensemble — matching HyperAgents ensemble.py.
+
+        Top-1 oracle across ALL prior generations: finds the best-scoring
+        candidate in the archive for this failure type. Returns None if
+        no prior candidates exist.
+        """
+        best = None
+        best_score = -1.0
+
+        for c in self._candidates:
+            if not c.selected:
+                continue
+            # Find the lineage for this candidate
+            for lin in self._lineages.values():
+                if c.id in lin.generations and lin.failure_type == failure_type:
+                    if c.fitness > best_score:
+                        best_score = c.fitness
+                        best = c
+
+        return best
 
     def _heuristic_fix(self, tool: str, original: str, finding: Dict) -> str:
         """Heuristic code fix when LLM unavailable."""
