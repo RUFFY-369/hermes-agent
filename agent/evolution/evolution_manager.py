@@ -528,7 +528,23 @@ class EvolutionManager:
         return _write_tool_file(proposal.target, proposal.content)
 
     def _apply_tool_modify(self, proposal: ImprovementProposal) -> bool:
-        """Modify an existing tool."""
+        """Modify an existing tool — routes through PR proposer for safety."""
+        try:
+            from agent.evolution.pr_proposer import propose_code_fix
+            result = propose_code_fix(
+                failure_analysis={"findings": [{"category": "auto-detected",
+                    "confidence": proposal.confidence, "description": proposal.rationale,
+                    "evidence": proposal.description}]},
+                proposed_code=proposal.content,
+                tool_name=proposal.target,
+            )
+            if "branch_name" in result:
+                logger.info("Code fix branch: %s", result["branch_name"])
+                return True
+            if "error" not in result:
+                return True
+        except Exception as e:
+            logger.debug("PR proposer unavailable: %s", e)
         if self._apply_tool_fn:
             return self._apply_tool_fn("modify", name=proposal.target,
                                        old_string=proposal.old_string,
