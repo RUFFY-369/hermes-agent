@@ -555,7 +555,6 @@ def _cmd_suggest_tasks(args) -> int:
 
         if args.save:
             try:
-                from agent.evolution.task_definition import TaskDefinition
                 yaml_str = observer.suggest_task_yaml(cluster)
                 task_path = get_task_dir() / f"{cluster.task_name}.yaml"
                 task_path.parent.mkdir(parents=True, exist_ok=True)

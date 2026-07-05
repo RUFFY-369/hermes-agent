@@ -29,8 +29,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 from agent.evolution.config import EvolutionConfig
 from agent.evolution.task_definition import (
@@ -48,7 +47,7 @@ from agent.evolution.trajectory_collector import (
 from agent.evolution.evaluator import TaskEvaluator, EvaluationContext
 from agent.evolution.failure_analyzer import FailureAnalysis, FailureAnalyzer
 from agent.evolution.improvement_proposer import ImprovementProposal, ImprovementProposer
-from agent.evolution.regression_gate import GateResult, GateVerdict, RegressionGate
+from agent.evolution.regression_gate import GateVerdict, RegressionGate
 from agent.evolution.evolution_store import EvolutionStore, get_evolution_store
 from agent.evolution.harness_variants import VariantManager
 
