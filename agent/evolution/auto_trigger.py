@@ -181,13 +181,16 @@ class AutoTrigger:
                 tool_name = tool_name[:40]
                 proposed_code = ""
 
-            # Step 2: Check approval level — PR branches are invasive
-            if self.nudge_level == APPROVE:
+            # Step 2: Check approval — PR branches default to asking
+            # Skills are safe (markdown), code branches are invasive (git history)
+            if self.nudge_level != SILENT:
                 return (
                     f"💡 HAEE detected a code-level issue with '{tool_name}'.\n"
                     f"   A fix can be auto-generated and submitted as a PR.\n"
                     f"   Approve: /evolution approve-pr {tool_name}"
                 )
+            # silent: create branch without asking
+            pass
             if self.nudge_level == OFF:
                 return None
 
