@@ -415,21 +415,15 @@ def _deduplicate_proposals(proposals: List[ImprovementProposal]) -> List[Improve
 # ---------------------------------------------------------------------------
 
 
+def _skill_frontmatter(name: str, desc: str, tags: str = "Verification") -> str:
+    return f"---\nname: {name}\ndescription: {desc}\nversion: 0.1.0\nauthor: Hermes\nmetadata:\n  hermes:\n    tags: [{tags}]\n---"
+
 def _generate_verification_skill(task_name: str, failed_checks: List[Dict[str, Any]]) -> str:
-    """Generate a real SKILL.md that teaches the agent to verify its work."""
     checks_desc = "\n".join(
         f"  - {c.get('type', 'unknown')}: {c.get('detail', 'verification failed')[:100]}"
         for c in failed_checks[:5]
     )
-    return f"""---
-name: verify-before-complete
-description: Always verify task completion before declaring done.
-version: 0.1.0
-author: Hermes
-metadata:
-  hermes:
-    tags: [Verification, Quality, Safety]
----
+    return _skill_frontmatter("verify-before-complete", "Always verify task completion before declaring done.", "Verification, Quality, Safety") + f"""
 
 # Verify Before Complete
 
@@ -480,16 +474,7 @@ Run: `test -f ~/.hermes/skills/verify-before-complete/SKILL.md && echo "skill in
 
 
 def _generate_workaround_skill(task_name: str, finding: Any) -> str:
-    """Generate a real SKILL.md documenting workarounds for missing tools."""
-    return f"""---
-name: workaround-{task_name[:48]}
-description: Workarounds for missing capabilities in {task_name}.
-version: 0.1.0
-author: Hermes
-metadata:
-  hermes:
-    tags: [Workaround, Troubleshooting]
----
+    return _skill_frontmatter(f"workaround-{task_name[:48]}", f"Workarounds for missing capabilities in {task_name}.", "Workaround, Troubleshooting") + f"""
 
 # Workarounds for {task_name}
 
@@ -532,17 +517,8 @@ Run: `test -f ~/.hermes/skills/workaround-{task_name[:48]}/SKILL.md && echo "ski
 
 
 def _generate_loop_detection_skill(implicated_tools: List[str], finding: Any) -> str:
-    """Generate a real SKILL.md teaching loop detection and breaking."""
     tools_list = ", ".join(implicated_tools[:5])
-    return f"""---
-name: detect-and-break-loops
-description: Detect and escape repetitive tool-call patterns.
-version: 0.1.0
-author: Hermes
-metadata:
-  hermes:
-    tags: [Safety, Loop-Detection, Efficiency]
----
+    return _skill_frontmatter("detect-and-break-loops", "Detect and escape repetitive tool-call patterns.", "Safety, Loop-Detection, Efficiency") + f"""
 
 # Detect and Break Loops
 
@@ -594,16 +570,7 @@ Run: `test -f ~/.hermes/skills/detect-and-break-loops/SKILL.md && echo "skill in
 
 
 def _generate_troubleshooting_skill(tool_name: str, finding: Any) -> str:
-    """Generate a real SKILL.md for troubleshooting tool errors."""
-    return f"""---
-name: troubleshoot-{tool_name[:48]}
-description: Diagnose and fix common {tool_name} errors.
-version: 0.1.0
-author: Hermes
-metadata:
-  hermes:
-    tags: [Troubleshooting, {tool_name}]
----
+    return _skill_frontmatter(f"troubleshoot-{tool_name[:48]}", f"Diagnose and fix common {tool_name} errors.", f"Troubleshooting, {tool_name}") + f"""
 
 # Troubleshoot {tool_name}
 
@@ -651,16 +618,7 @@ Run: `test -f ~/.hermes/skills/troubleshoot-{tool_name[:48]}/SKILL.md && echo "s
 
 
 def _generate_time_efficient_skill(task_name: str, finding: Any) -> str:
-    """Generate a real SKILL.md for time-efficient task strategies."""
-    return f"""---
-name: time-efficient-{task_name[:46]}
-description: Time-efficient approach for completing {task_name}.
-version: 0.1.0
-author: Hermes
-metadata:
-  hermes:
-    tags: [Efficiency, Time-Management]
----
+    return _skill_frontmatter(f"time-efficient-{task_name[:46]}", f"Time-efficient approach for completing {task_name}.", "Efficiency, Time-Management") + f"""
 
 # Time-Efficient {task_name}
 
