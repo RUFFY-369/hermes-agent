@@ -12631,7 +12631,7 @@ def cmd_insights(args):
 def cmd_evolution(args):
     """Dispatch `hermes evolution <subcommand>` to the evolution_cmd module."""
     try:
-        from hermes_cli.evolution_cmd import _cmd_status, _cmd_define_task, _cmd_list_tasks, _cmd_history, _cmd_variants, _cmd_enable, _cmd_disable, _cmd_run, _cmd_benchmark, _cmd_export, _cmd_suggest_tasks, _cmd_improvement
+        from hermes_cli.evolution_cmd import _cmd_status, _cmd_define_task, _cmd_list_tasks, _cmd_history, _cmd_variants, _cmd_enable, _cmd_disable, _cmd_run, _cmd_benchmark, _cmd_export, _cmd_suggest_tasks, _cmd_improvement, _cmd_pr_status, _cmd_approve_pr
         action = getattr(args, "evolution_action", None) or "status"
         dispatch = {
             "status": _cmd_status,
@@ -12646,6 +12646,8 @@ def cmd_evolution(args):
             "export": _cmd_export,
             "suggest-tasks": _cmd_suggest_tasks,
             "improvement": _cmd_improvement,
+            "pr-status": _cmd_pr_status,
+            "approve-pr": _cmd_approve_pr,
         }
         handler = dispatch.get(action, _cmd_status)
         sys.exit(handler(args))

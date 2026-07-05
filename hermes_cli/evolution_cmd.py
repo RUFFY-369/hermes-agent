@@ -140,6 +140,20 @@ def _cmd_status(args) -> int:
     except Exception:
         pass
 
+    # ── Pending PR Proposals ──
+    try:
+        from agent.evolution.pr_proposer import PRProposer
+        proposer = PRProposer()
+        lineages = proposer.get_all_lineages()
+        pending = [l for l in lineages if not l.resolved]
+        if pending:
+            print(f"\n  📝 PENDING CODE FIXES ({len(pending)})")
+            for lin in pending[:3]:
+                print(f"    • {lin.failure_type}: {lin.occurrences} occurrences, {len(lin.generations)} generations")
+            print(f"    Review: hermes evolution pr-status")
+    except Exception:
+        pass
+
     # ── Quick Start ──
     if not runs:
         benchtasks = []
@@ -609,6 +623,72 @@ def _cmd_improvement(args) -> int:
     return 0
 
 
+# ── pr-status ──────────────────────────────────────────────────────────
+
+
+def _cmd_pr_status(args) -> int:
+    """Show pending code fix proposals from the PR proposer."""
+    try:
+        from agent.evolution.pr_proposer import PRProposer
+        proposer = PRProposer()
+    except Exception as e:
+        print(f"Error: {e}")
+        return 1
+
+    lineages = proposer.get_all_lineages()
+    if not lineages:
+        print("No code fix proposals pending.")
+        print()
+        print("The PR proposer creates proposals when HAEE detects")
+        print("recurring tool-level failures during normal usage.")
+        print("Keep using Hermes — proposals appear automatically.")
+        return 0
+
+    print(f"Pending Code Fix Proposals ({len(lineages)}):\n")
+    for lin in lineages:
+        status = "✅ resolved" if lin.resolved else "🔧 pending"
+        print(f"  {status} {lin.failure_type}")
+        print(f"    Occurrences: {lin.occurrences} | Generations: {len(lin.generations)}")
+        if lin.improvement_delta:
+            print(f"    Improvement: {lin.improvement_delta:+.3f}")
+        if not lin.resolved:
+            print(f"    Approve: hermes evolution approve-pr <tool>")
+        print()
+
+    return 0
+
+
+def _cmd_approve_pr(args) -> int:
+    """Approve a pending code fix proposal and create the PR branch."""
+    tool = args.tool
+    try:
+        from agent.evolution.pr_proposer import PRProposer
+        proposer = PRProposer()
+
+        # Find the lineage for this tool
+        for lin in proposer.get_all_lineages():
+            if tool.lower() in lin.failure_id.lower() or tool.lower() in lin.failure_type.lower():
+                # Find the selected candidate
+                for cid in lin.generations:
+                    for c in proposer._candidates:
+                        if c.id == cid and c.selected:
+                            result = proposer.create_pr(c)
+                            if "branch" in result:
+                                print(f"✅ PR branch created: {result['branch']}")
+                                print(f"   Push: git push origin {result['branch']}")
+                                print(f"   Create PR: gh pr create --title 'fix({tool}): address {lin.failure_type}'")
+                                return 0
+                print(f"No selected candidate found for '{tool}'.")
+                print(f"Run 'hermes evolution pr-status' to see pending proposals.")
+                return 1
+
+        print(f"No pending proposal found for '{tool}'.")
+        return 1
+    except Exception as e:
+        print(f"Error: {e}")
+        return 1
+
+
 # ── Parser setup ────────────────────────────────────────────────────────
 
 
@@ -686,3 +766,12 @@ def register_parser(subparsers: argparse._SubParsersAction) -> None:
     # improvement
     p_improve = evo_subs.add_parser("improvement", help="Show statistical proof of agent improvement over time")
     p_improve.set_defaults(func=_cmd_improvement)
+
+    # pr-status
+    p_pr = evo_subs.add_parser("pr-status", help="Show pending code fix proposals awaiting review")
+    p_pr.set_defaults(func=_cmd_pr_status)
+
+    # approve-pr
+    p_apr = evo_subs.add_parser("approve-pr", help="Approve a pending code fix proposal")
+    p_apr.add_argument("tool", help="Tool name to approve a PR for")
+    p_apr.set_defaults(func=_cmd_approve_pr)
