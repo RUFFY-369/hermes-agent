@@ -542,16 +542,12 @@ def _cmd_suggest_tasks(args) -> int:
 
     saved_count = 0
     for i, cluster in enumerate(suggestions, 1):
-        label = cluster.task_name
-        print(f"  [{i}] {label}")
-        print(f"      Task:        {cluster.task_name}")
-        print(f"      Description: {cluster.description}")
-        print(f"      Occurrences: {cluster.occurrence_count} sessions")
-        print(f"      Confidence:  {pattern.confidence:.0%}")
-        print(f"      Tools used:  {', '.join(pattern.tools_used[:5])}")
-        if pattern.commands_seen:
-            print(f"      Sample cmd:  {pattern.commands_seen[-1][:80]}")
-        print(f"      Criteria:    {len(cluster.suggested_criteria)} suggested")
+        print(f"  [{i}] {cluster.task_name}")
+        print(f"      Description:  {cluster.description}")
+        print(f"      Occurrences:  {cluster.occurrence_count} sessions")
+        print(f"      Confidence:   {cluster.confidence:.0%} (α={1+cluster.positive_evidence} β={1+cluster.negative_evidence})")
+        print(f"      Complexity:   {cluster.estimated_complexity}/14")
+        print(f"      Criteria:     {len(cluster.suggested_criteria)} suggested")
 
         if args.verbose:
             yaml_str = observer.suggest_task_yaml(cluster)
