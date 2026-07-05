@@ -171,7 +171,17 @@ class AutoTrigger:
                 tool_name = tool_name[:40]
                 proposed_code = ""
 
-            # Step 2: Run one HyperAgents generation
+            # Step 2: Check approval level — PR branches are invasive
+            if self.nudge_level == APPROVE:
+                return (
+                    f"💡 HAEE detected a code-level issue with '{tool_name}'.\n"
+                    f"   A fix can be auto-generated and submitted as a PR.\n"
+                    f"   Approve: /evolution approve-pr {tool_name}"
+                )
+            if self.nudge_level == OFF:
+                return None
+
+            # Step 3: Run one HyperAgents generation
             proposer = PRProposer()
             result = proposer.run_generation(
                 failure_analysis={
