@@ -439,6 +439,23 @@ class ConversationObserver:
         self._prune()
         self._save()
 
+        # Track skill effectiveness for recursive evolution
+        if self._current_user_messages:
+            was_successful = any(
+                s in " ".join(self._current_user_messages).lower()
+                for s in ["thanks", "perfect", "great", "works", "awesome", "done"]
+            )
+            try:
+                from agent.evolution.skill_evolution import get_skill_evolution_tracker
+                evo_tracker = get_skill_evolution_tracker()
+                # Record outcome for active skills
+                for skill_name in evo_tracker._records:
+                    if fp.has_verification:
+                        evo_tracker._records[skill_name].total_successes += 1
+                evo_tracker._save()
+            except Exception:
+                pass
+
         # Auto-trigger: if verification was missing, create improvement skill
         return self._auto_trigger_if_needed(fp)
 

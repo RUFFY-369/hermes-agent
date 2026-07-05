@@ -105,6 +105,15 @@ class AutoTrigger:
         skill_path.mkdir(parents=True, exist_ok=True)
         (skill_path / "SKILL.md").write_text(content)
 
+        # Track this skill for recursive evolution
+        try:
+            from agent.evolution.skill_evolution import get_skill_evolution_tracker
+            tracker = get_skill_evolution_tracker()
+            tracker.start_session([skill_name])
+            tracker._get_or_create_record(skill_name)  # Initialize tracking
+        except Exception:
+            pass
+
         if self.nudge_level == SILENT:
             return None
         return (
