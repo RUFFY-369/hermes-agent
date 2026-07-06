@@ -137,21 +137,3 @@ def compute_q4_size(num_elements: int, channel_size: int = 128) -> dict:
     }
 
 
-# ── Legacy compatibility with Phase 0 naming ────────────────────────────
-
-def quantize_q4_per_channel_legacy(
-    tensor: np.ndarray,
-    channel_size: int = 128,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Alias for quantize_q4_per_channel."""
-    return quantize_q4_per_channel(tensor, channel_size)
-
-
-def dequantize_q4_per_channel_legacy(
-    packed: np.ndarray,
-    scales: np.ndarray,
-    channel_size: int = 128,
-    original_len: int | None = None,
-) -> np.ndarray:
-    """Alias for dequantize_q4_per_channel."""
-    return dequantize_q4_per_channel(packed, scales, channel_size, original_len)
