@@ -411,10 +411,29 @@ class KVMemoryProvider(MemoryProvider):
         if action != "add" or not content or not self._initialized:
             return
         try:
-            self._store_embedding(content, metadata={
-                "source": "builtin_memory_tool", "target": target,
-                **(metadata or {}),
-            })
+            embedding = self._backend.encode(content)
+            channel_size = self._config.q4_channel_size or 16
+            q4_packed, q4_scales = None, None
+            if self._config.storage_mode == "q4":
+                q4_packed, q4_scales = quantize_q4_per_channel(embedding, channel_size)
+            self._turn_number += 1
+            self._db.store_turn(
+                session_id=self._session_id,
+                turn_number=self._turn_number,
+                embedding=embedding,
+                q4_embedding=q4_packed,
+                q4_scales=q4_scales,
+                summary_text=content[:200],
+                model_id=self._model_id,
+                head_dim=channel_size,
+                num_kv_heads=embedding.shape[0] // max(channel_size, 1),
+                metadata={
+                    "source": "builtin_memory_tool", "target": target,
+                    "backend": self._backend.backend_name,
+                    **(metadata or {}),
+                },
+                store_fp16=(self._config.storage_mode != "q4"),
+            )
         except Exception as e:
             logger.debug("KV-Memory memory_write mirror failed: %s", e)
 
