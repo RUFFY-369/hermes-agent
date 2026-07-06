@@ -30,7 +30,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from benchmarks.memory.dataset import generate_dataset, ConversationPair
-from plugins.memory.kv_memory.quantize import quantize_q4_per_channel
+
 from plugins.memory.kv_memory.storage import KVMemoryDB
 from plugins.memory.kv_memory.retrieval import KVRetriever, cosine_similarity
 from plugins.memory.kv_memory.config import KVMemoryConfig
@@ -164,62 +164,6 @@ class Float16KVMemoryBackend:
         q_emb = self._backend.encode(query)
         results = self._retriever.retrieve(q_emb, k=k)
         self._query_times.append((time.perf_counter() - t0) * 1000)
-        if not hasattr(self, '_id_to_idx'):
-            self._id_to_idx = {}
-            for t in self._db.get_turns(session_id="bench", limit=10000):
-                self._id_to_idx[t["id"]] = t["turn_number"] - 1
-        indices = [self._id_to_idx[r["turn_id"]] for r in results
-                   if r["turn_id"] in self._id_to_idx]
-        return indices[:k]
-
-    @property
-    def storage_bytes(self) -> int:
-        # 384 floats at 2 bytes each (float16) per embedding
-        stats = self._db.get_stats()
-        return stats["total_turns"] * 384 * 2
-
-    def close(self):
-        self._db.close()
-        for ext in ["", "-wal", "-shm"]:
-            p = self._db_path + ext
-            if os.path.exists(p):
-                os.unlink(p)
-
-
-class Q4KVMemoryBackend:
-    """Q4-quantized embeddings — our provider."""
-
-    def __init__(self, channel_size: int = 16):
-        from plugins.memory.kv_memory.capture import create_embedding_backend
-        self._backend = create_embedding_backend("auto")
-        self._db_path = tempfile.mktemp(suffix=".db")
-        self._db = KVMemoryDB(self._db_path)
-        self._db.initialize_schema()
-        config = KVMemoryConfig(db_path=self._db_path, top_k=10, min_similarity=0.0,
-                                diversity_lambda=1.0, temporal_decay_half_life=0)
-        self._retriever = KVRetriever(self._db, config)
-        self._index_time = 0
-        self._query_times = []
-        self._cs = channel_size
-
-    def index(self, conversations: List[str]) -> None:
-        t0 = time.perf_counter()
-        for i, conv in enumerate(conversations):
-            emb = self._backend.encode(conv)
-            packed, scales = quantize_q4_per_channel(emb, channel_size=self._cs)
-            self._db.store_turn(
-                session_id=f"bench", turn_number=i + 1, embedding=emb,
-                q4_embedding=packed, q4_scales=scales,
-                summary_text=conv[:200], head_dim=self._cs, num_kv_heads=384 // self._cs,
-            )
-        self._index_time = (time.perf_counter() - t0) * 1000
-
-    def search(self, query: str, k: int = 10) -> List[int]:
-        t0 = time.perf_counter()
-        q_emb = self._backend.encode(query)
-        results = self._retriever.retrieve(q_emb, k=k)
-        self._query_times.append((time.perf_counter() - t0) * 1000)
-        # Build turn_id -> index map once
         if not hasattr(self, '_id_to_idx'):
             self._id_to_idx = {}
             for t in self._db.get_turns(session_id="bench", limit=10000):
