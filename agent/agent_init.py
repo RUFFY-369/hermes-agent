@@ -1342,6 +1342,18 @@ def init_agent(
             # Register evolution tools when enabled
             from agent.evolution.evolution_hooks import on_session_start as _evo_session_start
             _evo_session_start(agent)
+            try:
+                from agent.evolution.evolution_tools import get_evolution_tool_schemas
+                from tools.registry import registry as _tool_registry
+                for schema in get_evolution_tool_schemas():
+                    _tool_registry.register(
+                        name=schema["name"],
+                        toolset="evolution",
+                        schema=schema,
+                        handler=lambda **kw: f"Evolution tool '{schema['name']}' called. Use hermes evolution commands.",
+                    )
+            except Exception as _evo_tool_err:
+                _ra().logger.debug("Evolution tool registration skipped: %s", _evo_tool_err)
             _ra().logger.info("Evolution Engine activated (mode=%s)", _evo_config.mode)
         else:
             _ra().logger.debug("Evolution Engine disabled in config")

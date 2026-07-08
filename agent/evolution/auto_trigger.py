@@ -96,9 +96,12 @@ class AutoTrigger:
         if not content:
             return None
 
-        # Apply
+        # Check if skill already exists — don't duplicate
         from hermes_constants import get_hermes_home
         skill_path = get_hermes_home() / "skills" / skill_name
+        if (skill_path / "SKILL.md").exists():
+            return None  # Already exists, let skill_evolution handle improvement
+
         skill_path.mkdir(parents=True, exist_ok=True)
         (skill_path / "SKILL.md").write_text(content)
 

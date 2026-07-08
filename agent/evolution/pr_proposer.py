@@ -142,6 +142,10 @@ class PRProposer:
             return {"error": "No findings to fix"}
 
         top = findings[0]
+        file_path = self._resolve_path(tool_name)
+        if _is_excluded(file_path):
+            return {"error": f"Path '{file_path}' is excluded from modification"}
+
         failure_id = self._failure_id(failure_analysis)
         original_code = self._read_code(tool_name)
         if not original_code:
