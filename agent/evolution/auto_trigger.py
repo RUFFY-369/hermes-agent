@@ -96,14 +96,10 @@ class AutoTrigger:
         if not content:
             return None
 
-        # Check if skill already exists — don't duplicate
-        from hermes_constants import get_hermes_home
-        skill_path = get_hermes_home() / "skills" / skill_name
-        if (skill_path / "SKILL.md").exists():
-            return None  # Already exists, let skill_evolution handle improvement
-
-        skill_path.mkdir(parents=True, exist_ok=True)
-        (skill_path / "SKILL.md").write_text(content)
+        # Route through Hermes' skill_manage for proper staging/provenance
+        result = self._write_via_skill_manage(skill_name, content)
+        if result is None:
+            return None  # Skill already exists — let skill_evolution handle it
 
         # Track this skill for recursive evolution
         try:
@@ -116,8 +112,9 @@ class AutoTrigger:
 
         if self.nudge_level == SILENT:
             return None
+        staged = " (staged for approval)" if result.get("staged") else ""
         return (
-            f"🔧 HAEE: {msg}.\n"
+            f"🔧 HAEE: {msg}.{staged}\n"
             f"   Auto-created '{skill_name}' skill to prevent this.\n"
             f"   I'll handle this correctly next time."
         )
@@ -480,26 +477,48 @@ Respond with ONLY valid JSON:
 
         return self._format_success_nudge(applied, analysis)
 
-    def _apply_silently(self, proposal) -> None:
-        """Apply a proposal without user interaction."""
+    def _write_via_skill_manage(self, skill_name: str, content: str) -> Optional[dict]:
+        """Route a skill write through Hermes' skill_manage tool.
+
+        Respects skills.write_approval — stages writes when approval is enabled.
+        Returns the result dict, or None if skill already exists.
+        """
         from hermes_constants import get_hermes_home
 
-        if proposal.action_type.value == "skill_create":
-            skill_path = get_hermes_home() / "skills" / proposal.target
+        # Don't duplicate existing skills
+        if (get_hermes_home() / "skills" / skill_name / "SKILL.md").exists():
+            return None
+
+        try:
+            from tools.skill_manager_tool import skill_manage
+            result_json = skill_manage(action="create", name=skill_name, content=content)
+            import json
+            return json.loads(result_json)
+        except Exception:
+            # Fallback: direct write if skill_manage is unavailable
+            skill_path = get_hermes_home() / "skills" / skill_name
             skill_path.mkdir(parents=True, exist_ok=True)
-            (skill_path / "SKILL.md").write_text(proposal.content)
+            (skill_path / "SKILL.md").write_text(content)
+            return {"success": True}
+
+    def _apply_silently(self, proposal) -> None:
+        """Apply a proposal without user interaction — routed through skill_manage."""
+        if proposal.action_type.value == "skill_create":
+            self._write_via_skill_manage(proposal.target, proposal.content)
         elif proposal.action_type.value == "skill_patch":
-            skill_path = get_hermes_home() / "skills" / proposal.target / "SKILL.md"
-            if skill_path.exists():
-                content = skill_path.read_text()
-                if proposal.old_string in content:
-                    skill_path.write_text(
-                        content.replace(proposal.old_string, proposal.new_string)
-                    )
+            try:
+                from tools.skill_manager_tool import skill_manage
+                skill_manage(action="patch", name=proposal.target,
+                            old_string=proposal.old_string,
+                            new_string=proposal.new_string)
+            except Exception:
+                pass
         elif proposal.action_type.value == "memory_update":
-            mem_path = get_hermes_home() / "MEMORY.md"
-            with open(mem_path, "a") as f:
-                f.write(f"\n\n## Auto: {proposal.target}\n\n{proposal.content}\n")
+            try:
+                from tools.skill_manager_tool import skill_manage
+                skill_manage(action="create", name=proposal.target, content=proposal.content)
+            except Exception:
+                pass
 
     def _format_success_nudge(self, applied, analysis) -> str:
         """Format a nudge message for auto-applied fixes."""
