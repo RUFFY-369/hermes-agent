@@ -25,16 +25,17 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Module-level state (one per process, like MemoryManager)
+# Per-agent state — follows MemoryManager pattern (agent._evolution_manager)
 # ---------------------------------------------------------------------------
 
-_evolution_manager: Optional[Any] = None  # EvolutionManager instance
-_hook_timers: Dict[str, float] = {}        # tool_name → start_time for duration tracking
+_hook_timers: Dict[str, float] = {}  # tool_name → start_time for duration tracking
 
 
-def get_evolution_manager() -> Optional[Any]:
-    """Return the active EvolutionManager, if any."""
-    return _evolution_manager
+def get_evolution_manager(agent: Any = None) -> Optional[Any]:
+    """Return the EvolutionManager for *agent*, if any."""
+    if agent is not None:
+        return getattr(agent, "_evolution_manager", None)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -45,17 +46,18 @@ def get_evolution_manager() -> Optional[Any]:
 def on_session_start(agent: Any, **kwargs: Any) -> None:
     """Initialize the Evolution Engine for a new session.
 
-    Called once at agent startup. Reads config and sets up the manager.
-    Also starts the conversation observer for auto-task discovery.
+    Called once at agent startup. Attaches EvolutionManager to agent
+    instance (same pattern as MemoryManager → agent._memory_manager).
     No-op if evolution is disabled in config.
     """
-    global _evolution_manager
+    # Already initialized for this agent instance
+    if getattr(agent, "_evolution_manager", None) is not None:
+        return
 
     try:
         from agent.evolution.config import EvolutionConfig
         config = EvolutionConfig.from_config()
         if not config.enabled:
-            logger.debug("Evolution Engine disabled in config — skipping init")
             return
     except Exception as e:
         logger.debug("Evolution config load failed: %s", e)
@@ -68,7 +70,7 @@ def on_session_start(agent: Any, **kwargs: Any) -> None:
         session_id = getattr(agent, "session_id", "")
         manager = EvolutionManager()
         manager.initialize(session_id=session_id, config=config)
-        _evolution_manager = manager
+        agent._evolution_manager = manager
 
         # Start conversation observer for auto-task discovery
         observer = get_observer()
@@ -80,22 +82,23 @@ def on_session_start(agent: Any, **kwargs: Any) -> None:
 
 
 def on_session_end(agent: Any, **kwargs: Any) -> None:
-    """Finalize any active evolution runs and persist state."""
-    global _evolution_manager
+    """Per-turn finalization — matches MemoryManager per-turn hooks.
 
-    manager = _evolution_manager
+    Does NOT shutdown the EvolutionManager (that happens at actual
+    session teardown via atexit/reset). Only finalizes active runs
+    and fires observer/auto-export.
+    """
+    manager = getattr(agent, "_evolution_manager", None)
     if manager is None:
         return
 
+    # Finalize any active evolution run
     try:
         active_run = manager.get_active_run()
         if active_run:
             manager.end_task(active_run)
-        manager.shutdown()
     except Exception as e:
-        logger.debug("Evolution shutdown error: %s", e)
-    finally:
-        _evolution_manager = None
+        logger.debug("Evolution run finalization error: %s", e)
 
     # Finalize conversation observer — detect patterns from this session
     try:
@@ -125,7 +128,7 @@ def on_session_end(agent: Any, **kwargs: Any) -> None:
 def pre_llm_call(agent: Any, messages: List[Dict[str, Any]], **kwargs: Any) -> None:
     """Called before each model call. Tracks timing for trajectory."""
     global _hook_timers
-    manager = _evolution_manager
+    manager = getattr(agent, "_evolution_manager", None)
     if manager is None:
         return
 
@@ -144,7 +147,7 @@ def post_llm_call(
 ) -> None:
     """Called after each model call. Records the call in the trajectory."""
     global _hook_timers
-    manager = _evolution_manager
+    manager = getattr(agent, "_evolution_manager", None)
     if manager is None:
         return
 
@@ -211,7 +214,7 @@ def post_tool_call(
 ) -> None:
     """Called after each tool execution. Records the call in the trajectory."""
     global _hook_timers
-    manager = _evolution_manager
+    manager = getattr(agent, "_evolution_manager", None)
     if manager is None:
         return
 
@@ -264,7 +267,7 @@ def on_turn_end(agent: Any, **kwargs: Any) -> None:
     Checks if the agent appears to have completed the active task
     and triggers evaluation if so.
     """
-    manager = _evolution_manager
+    manager = getattr(agent, "_evolution_manager", None)
     if manager is None:
         return
 
