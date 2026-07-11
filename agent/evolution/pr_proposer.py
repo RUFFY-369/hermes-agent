@@ -434,13 +434,15 @@ Start with: # Fixed {tool}"""
     # ── PR Creation ────────────────────────────────────────────────────
 
     def create_pr(self, candidate: CandidateFix) -> Dict[str, Any]:
-        """Create a git branch + commit from the selected candidate."""
+        """Create a git branch first, then modify — never touch original worktree."""
         branch = f"haee-gen{candidate.generation}-{candidate.id}"
         try:
-            fp = self.repo_path / candidate.file_path
-            fp.write_text(candidate.proposed_code)
+            # Branch first — worktree stays clean if this fails
             subprocess.run(["git", "checkout", "-b", branch],
                           cwd=self.repo_path, capture_output=True, check=True)
+            # Modify only on the branch
+            fp = self.repo_path / candidate.file_path
+            fp.write_text(candidate.proposed_code)
             subprocess.run(["git", "add", str(candidate.file_path)],
                           cwd=self.repo_path, capture_output=True, check=True)
             subprocess.run(["git", "commit", "-m",
@@ -545,6 +547,22 @@ Start with: # Fixed {tool}"""
             for ld in data.get("lineages", []):
                 lin = EvolutionLineage(**ld)
                 self._lineages[lin.failure_id] = lin
+            # Reload candidates so approve-pr can find them after process restart
+            for cd in data.get("candidates", []):
+                cand = CandidateFix(
+                    id=cd["id"], file_path=cd["file_path"],
+                    proposed_code=cd.get("proposed_code", ""),
+                    original_code=cd.get("original_code", ""),
+                    description=cd.get("description", ""),
+                    generation=cd.get("generation", 0),
+                    parent_failure_id=cd.get("parent_failure_id", ""),
+                    benchmark_score=cd.get("benchmark_score", 0.0),
+                    smoke_test_passed=cd.get("smoke_test_passed", False),
+                    regression_free=cd.get("regression_free", False),
+                    selected=cd.get("selected", False),
+                    created_at=cd.get("created_at", ""),
+                )
+                self._candidates.append(cand)
         except Exception: pass
 
     def _save_lineage(self) -> None:
@@ -555,6 +573,7 @@ Start with: # Fixed {tool}"""
                 json.dump({
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                     "lineages": [l.to_dict() for l in self._lineages.values()],
+                    "candidates": [c.to_dict() for c in self._candidates[-50:]],
                 }, f, indent=2, default=str)
         except Exception: pass
 
