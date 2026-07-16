@@ -27,7 +27,7 @@ providing curated, tested, official skills for users who want them.
 
 | Skillset | Description | Category |
 |----------|-------------|----------|
-| **Orchestra** | 87+ deep research engineering primitives for RL, Post-Training, and Model Architecture. | `research/orchestra` |
+| **Orchestra** | 94+ deep research engineering primitives for RL, Post-Training, and Model Architecture. | `research/orchestra` |
 | **Canvas** | Manage courses, assignments, and files from Canvas LMS. | `education/canvas` |
 | **Docker** | Advanced Docker CLI management (containers, images, compose). | `devops/docker` |
 
