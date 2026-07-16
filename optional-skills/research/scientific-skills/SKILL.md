@@ -1,11 +1,13 @@
 ---
 name: scientific-skills
-description: Gateway to 134+ specialized scientific skills from scientific-agent-skills. Covers 17 high-level domains including Bioinformatics, Cheminformatics, Medical Imaging, Physics, Laboratory Automation, and more. Fetches expert reference material on demand.
+description: Gateway to 134+ scientific skills across 17 domains.
 version: 1.1.0
 platforms: [linux, macos]
+author: K-Dense-AI
+license: MIT
 metadata:
   hermes:
-    tags: [science, biology, chemistry, physics, engineering, research, bioinformatics, cheminformatics, medical, data-science, analytics, lab-automation]
+    tags: [science, biology, chemistry, physics, research, bioinformatics, cheminformatics, medical, lab-automation]
     category: research
 ---
 
@@ -24,12 +26,11 @@ This skill is a gateway to the **scientific-agent-skills** library. Instead of b
 ## How to fetch and use a skill
 
 1. Identify the domain and skill name from the index below.
-2. Clone the repository to a temporary directory (e.g., `/tmp/science-library`).
-   *   URL: `https://github.com/K-Dense-AI/scientific-agent-skills.git`
-   *   Command Pattern: `git clone --depth 1 <URL> <TARGET_DIR>`
-3. Read the specific skill:
-   *   Path: `scientific-skills/<domain-name>/SKILL.md`
-4. Use the fetched file as expert reference material for valid workflows and parameters.
+2. Use the `terminal` tool to clone the repository:
+   `git clone --depth 1 https://github.com/K-Dense-AI/scientific-agent-skills.git /tmp/science-library`
+3. Use the `read_file` tool to inspect the specific skill:
+   `/tmp/science-library/skills/<skill-name>/SKILL.md`
+4. Apply the fetched patterns to the current task.
 
 ## Skill Index (17 Official Domains)
 
